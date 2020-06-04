@@ -217,7 +217,7 @@ class Tracking(QThread):
                 unique = np.delete(unique, 0)
             # in case we have more objects in the window, we increase the threshold in case of manual threshold segmentation
             # that's because it might happend that the objects break into more parts
-            if len(unique) > 1 and self.manThreshold <= 1.0:
+            if len(unique) > 1 and self.manThreshold <= 1.0 and self.segmentationTech == "Manual Threshold":
                 self.manThreshold += 0.0005
                 return True
 
@@ -336,10 +336,10 @@ class Tracking(QThread):
         if self.segmentationTech == "Manual Threshold":
             img.thresholdSegment(imgFilt, self.manThreshold)
 
-        elif self.segmentationTech == "Otsu Threshold":
+        elif self.segmentationTech == "Automatic Thresh":
             img.yenThreshold(imgFilt)
 
-        elif self.segmentationTech == "Sobel+Watershed":
+        elif self.segmentationTech == "Edge Operators":
             img.sobel(imgFilt)
             img.watershed()
 
@@ -348,12 +348,6 @@ class Tracking(QThread):
             img.cannyEdgeDetector(imgFilt, self.sigmaCanny,
                                   self.lowThresh, self.highThresh)
             img.fillingHoles()
-
-        elif self.segmentationTech == "Laplace":
-            img.laplace(imgFilt)
-
-        elif self.segmentationTech == "K-means":
-            pass
 
         # Labelling
 
