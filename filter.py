@@ -1,5 +1,7 @@
 from skimage.restoration import denoise_bilateral
 import skimage
+import numpy as np
+from scipy import signal
 
 # methods used for filtering image using certain algorithm
 class medianFilter():
@@ -15,7 +17,11 @@ class meanFilter():
     @staticmethod
     def process(img, kernel):
         #img = skimage.util.img_as_uint(img)
-        imageFilt = skimage.filters.rank.mean(img, kernel)
+        kernel1 = np.ones((5, 5), dtype=np.int8)
+
+        imageFilt = np.divide(signal.convolve2d(
+            img, kernel, boundary='symm'), kernel.size)
+        #imageFilt = skimage.filters.rank.mean(img, kernel)
         return imageFilt
 
 
