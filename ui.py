@@ -51,6 +51,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.labelCount = [0] * 100
         self.pozX = [[] for x in range(100)]
         self.pozY = [[] for x in range(100)]
+        self.orientation = [[] for x in range(100)]
         self.pixmap = None
 
         self.lowThresh = None
@@ -209,7 +210,7 @@ class AppWidget(QtWidgets.QMainWindow):
 
         self.tableButtonsGroupBox = QtWidgets.QGroupBox(self)
         self.tableButtonsGroupBox.setGeometry(
-            QtCore.QRect(20, 975, 450, 35))
+            QtCore.QRect(20, 975, 620, 35))
         self.tableButtonsGroupBox.setEnabled(False)
         self.tableButtonsGroupBox.setFlat(True)
         self.tableButtonsGroupBox.setObjectName("tableButtonsGroupBox")
@@ -217,7 +218,7 @@ class AppWidget(QtWidgets.QMainWindow):
 
         self.horizontalLayoutWidget = QtWidgets.QWidget(self.tableButtonsGroupBox)
         self.horizontalLayoutWidget.setGeometry(
-            QtCore.QRect(5, 5, 450, 25))
+            QtCore.QRect(5, 5, 600, 25))
         self.horizontalLayoutWidget.setObjectName("horizontalLayoutWidget")
 
         self.horizontalLayout = QtWidgets.QHBoxLayout(
@@ -260,6 +261,12 @@ class AppWidget(QtWidgets.QMainWindow):
         self.plotTableButton.setObjectName("plotTableButton")
         self.horizontalLayout.addWidget(self.plotTableButton)
         self.plotTableButton.clicked.connect(self.plotResutlts)
+
+        self.plotOrientationButton = QtWidgets.QPushButton(
+            "Plot", self.horizontalLayoutWidget)
+        self.plotOrientationButton.setObjectName("plotOrientationButton")
+        self.horizontalLayout.addWidget(self.plotOrientationButton)
+        self.plotOrientationButton.clicked.connect(self.plotOrientation)
 
         ## Filter Group Box ##
 
@@ -385,11 +392,9 @@ class AppWidget(QtWidgets.QMainWindow):
         self.segmentationList.setGeometry(QtCore.QRect(10, 20, 125, 110))
         self.segmentationList.setObjectName("segmentationList")
         self.segmentationList.addItem('Manual Threshold')
-        self.segmentationList.addItem('Otsu Threshold')
-        self.segmentationList.addItem('Sobel+Watershed')
+        self.segmentationList.addItem('Automatic Thresh')
+        self.segmentationList.addItem('Edge Operators')
         self.segmentationList.addItem('Canny Edge Detector')
-        self.segmentationList.addItem('Laplace')
-        self.segmentationList.addItem('K-Means')
         self.segmentationList.itemDoubleClicked.connect(
             self.segmentationPosition)
 
@@ -819,7 +824,7 @@ class AppWidget(QtWidgets.QMainWindow):
             self.showImg(self.images[index].cannyEdgeDetector(
             self.currentFiltImg, self.sigmaCanny, self.lowThresh, self.highThresh))
 
-        elif self.currentState == "Sobel":
+        elif self.currentState == "Edges":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
                             ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
             self.images[index].loadImage()
@@ -845,67 +850,7 @@ class AppWidget(QtWidgets.QMainWindow):
                 self.currentFiltImg = bilateralFilter.process(
                     self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
 
-            self.showImg(self.images[index].sobel(self.currentFiltImg))
-
-        elif self.currentState == "Markers":
-            neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
-                            ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
-            self.images[index].loadImage()
-            self.images[index].medianBackground(neighborhood)
-            self.images[index].threshold(self.threshold)
-            self.images[index].dilation()
-            self.images[index].meanBackground(neighborhood)
-            self.images[index].imageDivision()
-
-            self.currentFiltImg = np.zeros_like(self.images[index].data)
-
-            if self.filter == "Median Filter":
-                self.currentFiltImg = medianFilter.process(self.images[index].divisionImg, self.kernel)
-                #self.currentFiltImg= np.where(self.images[index].mask == 1, self.currentFiltImg, 1)
-
-
-            elif self.filter == "Mean Filter":
-                self.currentFiltImg = meanFilter.process(self.images[index].divisionImg, self.kernel)
-
-
-            elif self.filter == "Gauss Filter":
-                self.currentFiltImg = gaussFilter.process(self.images[index].divisionImg, self.sigma)
-                self.showImg(self.currentFiltImg)
-
-            elif self.filter == "Bilateral Filter":
-                self.currentFiltImg = bilateralFilter.process(
-                    self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
-                self.showImg(self.currentFiltImg)
-
-            self.showImg(self.images[index].markers(self.lowThresh,self.highThresh))
-
-        elif self.currentState == "Laplace":
-            neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
-                            ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
-            self.images[index].loadImage()
-            self.images[index].medianBackground(neighborhood)
-            self.images[index].threshold(self.threshold)
-            self.images[index].dilation()
-            self.images[index].meanBackground(neighborhood)
-            self.images[index].imageDivision()
-
-            self.currentFiltImg = np.zeros_like(self.images[index].data)
-
-            if self.filter == "Median Filter":
-                self.currentFiltImg = medianFilter.process(self.images[index].divisionImg, self.kernel)
-                #self.currentFiltImg= np.where(self.images[index].mask == 1, self.currentFiltImg, 1)
-
-            elif self.filter == "Mean Filter":
-                self.currentFiltImg = meanFilter.process(self.images[index].divisionImg, self.kernel)
-
-            elif self.filter == "Gauss Filter":
-                self.currentFiltImg = gaussFilter.process(self.images[index].divisionImg, self.sigma)
-
-            elif self.filter == "Bilateral Filter":
-                self.currentFiltImg = bilateralFilter.process(
-                    self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
-
-            self.showImg(self.images[index].laplace(self.currentFiltImg))
+            self.showImg(self.images[index].edges(self.currentFiltImg))
 
         elif self.currentState == "Segmented":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
@@ -937,24 +882,19 @@ class AppWidget(QtWidgets.QMainWindow):
             if self.segmentationTech == "Manual Threshold":
                 self.showImg(self.images[index].thresholdSegment(self.currentFiltImg, self.manThreshold))
 
-            elif self.segmentationTech == "Otsu Threshold":
-                self.showImg(self.images[index].yenThreshold(self.currentFiltImg))
+            elif self.segmentationTech == "Automatic Thresh":
+                method = self.autoThresh.currentText()
+                self.showImg(self.images[index].autoThresh(method, self.currentFiltImg))
 
-            elif self.segmentationTech == "Sobel+Watershed":
-                self.images[index].sobel(self.currentFiltImg)
-                self.showImg(self.images[index].watershed())
+            elif self.segmentationTech == "Edge Operators":
+                self.images[index].edges(self.currentFiltImg)
+                self.showImg(self.images[index].edgesFilling())
 
             elif self.segmentationTech == "Canny Edge Detector":
 
                 self.images[index].cannyEdgeDetector(self.currentFiltImg, self.sigmaCanny,
                                       self.lowThresh, self.highThresh)
                 self.showImg(self.images[index].fillingHoles())
-
-            elif self.segmentationTech == "Laplace":
-                self.showImg(self.images[index].laplace(self.currentFiltImg))
-
-            elif self.segmentationTech == "K-means":
-                pass
 
         elif self.currentState == "Labeled":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
@@ -986,24 +926,19 @@ class AppWidget(QtWidgets.QMainWindow):
             if self.segmentationTech == "Manual Threshold":
                 self.images[index].thresholdSegment(self.currentFiltImg, self.manThreshold)
 
-            elif self.segmentationTech == "Otsu Threshold":
-                self.images[index].yenThreshold(self.currentFiltImg)
+            elif self.segmentationTech == "Automatic Thresh":
+                method = self.autoThresh.currentText()
+                self.images[index].autoThresh(method, self.currentFiltImg)
 
-            elif self.segmentationTech == "Sobel+Watershed":
-                self.images[index].sobel(self.currentFiltImg)
-                self.images[index].watershed()
+            elif self.segmentationTech == "Edge Operators":
+                self.images[index].edges(self.currentFiltImg)
+                self.showImg(self.images[index].edgesFilling())
 
             elif self.segmentationTech == "Canny Edge Detector":
 
                 self.images[index].cannyEdgeDetector(self.currentFiltImg, self.sigmaCanny,
                                       self.lowThresh, self.highThresh)
                 self.images[index].fillingHoles()
-
-            elif self.segmentationTech == "Laplace":
-                self.images[index].laplace(self.currentFiltImg)
-
-            elif self.segmentationTech == "K-means":
-                pass
 
             self.objectProperties, _ , image = self.images[index].labelling()
             self.showImg(image)
@@ -1151,7 +1086,7 @@ class AppWidget(QtWidgets.QMainWindow):
     def filterPosition(self):
         self.filter = self.filterList.currentItem().text()
 
-        # disableing all the boxes for different filtration methods
+        # disabling all the boxes for different filtration methods
         self.bilateralFilterGroupBox.setVisible(False)
         self.medianFilterGroupBox.setVisible(False)
         self.gaussFilterGroupBox.setVisible(False)
@@ -1307,11 +1242,11 @@ class AppWidget(QtWidgets.QMainWindow):
 
             self.thresholdManGB.setVisible(True)
 
-        elif self.segmentationTech == "Otsu Threshold":
+        elif self.segmentationTech == "Automatic Thresh":
             self.segmentButton.setEnabled(True)
             self.otsuThreshGB.setVisible(True)
 
-        elif self.segmentationTech == "Sobel+Watershed":
+        elif self.segmentationTech == "Edge Operators":
             self.swSegmentationGB.setVisible(True)
 
         elif self.segmentationTech == "Canny Edge Detector":
@@ -1324,14 +1259,6 @@ class AppWidget(QtWidgets.QMainWindow):
             self.highThresholdSlider.setSingleStep(1)
             self.highThresholdSlider.setProperty("value", 100000)
             self.cannyEdgeDetecetorGB.setVisible(True)
-            self.segmentButton.setEnabled(True)
-
-        elif self.segmentationTech == "Laplace":
-            self.laplaceGB.setVisible(True)
-            self.segmentButton.setEnabled(True)
-
-        elif self.segmentationTech == "K-Means":
-            self.kmeansGB.setVisible(True)
             self.segmentButton.setEnabled(True)
 
 
@@ -1353,14 +1280,14 @@ class AppWidget(QtWidgets.QMainWindow):
 
             self.showImg(self.currentImage)
 
-        elif self.segmentationTech == "Otsu Threshold":
+        elif self.segmentationTech == "Automatic Thresh":
             # take selected auto threshold method
             method = self.autoThresh.currentText()
             # apply this method to the filtered image and display the result
             self.currentImage = image.autoThresh(method, self.currentFiltImg)
             self.showImg(self.currentImage)
 
-        elif self.segmentationTech == "Sobel+Watershed":
+        elif self.segmentationTech == "Edge Operators":
             # filling the edges created by one of the edge finding methods
             self.currentImage = image.edgesFilling()
             self.showImg(self.currentImage)
@@ -1368,14 +1295,6 @@ class AppWidget(QtWidgets.QMainWindow):
         elif self.segmentationTech == "Canny Edge Detector":
             # filling the edges found by CED
             self.currentImage= image.fillingHoles()
-            self.showImg(self.currentImage)
-
-        elif self.segmentationTech == "K-Means":
-            segments = int(self.segmentsValue.text())
-            sigma = int(self.sigmaKmeansValue.text())
-            iterations = int(self.iterKMeansValue.text())
-            compact = float(self.compactKMeansValue.text())
-            self.currentImage= image.kmeans(self.currentFiltImg, segments, sigma, iterations, compact)
             self.showImg(self.currentImage)
 
     def edges(self):
@@ -1388,6 +1307,7 @@ class AppWidget(QtWidgets.QMainWindow):
         # applying this method on filtered image and create an edge map
         self.currentImage = image.edges(method, self.currentFiltImg)
         self.showImg(self.currentImage)
+        self.currentState = 'Edges'
 
     def canny(self):
         image = self.images[self.index]
@@ -1419,7 +1339,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.showImg(self.currentImage)
 
 
-    def labelling(self,x=None,y=None):
+    def labelling(self):
         image = self.images[self.index]
         self.currentState = "Labeled"
 
@@ -1429,9 +1349,11 @@ class AppWidget(QtWidgets.QMainWindow):
         self.labelCount = [0] * 100
         self.pozX = [[] for x in range(100)]
         self.pozY = [[] for x in range(100)]
+        self.orientation = [[] for x in range(100)]
 
         # enable properties table and tracking button
         self.objectPropertiesTable.setEnabled(True)
+        self.objectPropertiesTable.removeRow(0)
         self.tableButtonsGroupBox.setEnabled(True)
         self.objectPropertiesTable.setColumnCount(len(self.labels))
         self.objectPropertiesTable.setHorizontalHeaderLabels(self.labels)
@@ -1440,7 +1362,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.startTrackingButton.setEnabled(True)
 
         # get properties of objects in image and color image
-        self.objectProperties, _ , self.currentImage = image.labelling(x,y)
+        self.objectProperties, _ , self.currentImage = image.labelling()
 
         self.objectPropertiesTable.clearContents()
         self.objectPropertiesTable.setRowCount(1)
@@ -1452,35 +1374,48 @@ class AppWidget(QtWidgets.QMainWindow):
     def tableUpdate(self, objectProperties, orientation = None):
         # counting all the rows
         rowCount = self.objectPropertiesTable.rowCount()
+        if rowCount == 1:
+            self.objectPropertiesTable.removeRow(0)
+        rowCount = self.objectPropertiesTable.rowCount()
+        print(rowCount)
         self.objectProperties = objectProperties
-
         # creating list of data
         datas = ['']*len(self.labels)
 
         # iteration over all the obects in given objectProperties
         for i, (fiber,color) in enumerate(zip(objectProperties, self.colors)):
             # create a new row in the table
-            self.objectPropertiesTable.insertRow(rowCount-1)
+            self.objectPropertiesTable.insertRow(rowCount)
             # get centroid position of the current object
             centroidx, centroidy = fiber.centroid
 
-            # update position list of specific object
             if fiber.label in self.uniqueLabel:
+                # count number of records for specific label
                 self.labelCount[fiber.label] += 1
+                # update position list of specific object
                 self.pozX[fiber.label].append(centroidy)
                 self.pozY[fiber.label].append(centroidx)
+                if orientation:
+                    self.orientation[fiber.label].append(orientation[i])
+                else:
+                    self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
             else:
+                # add new label to the list of labels in table
                 self.uniqueLabel.append(fiber.label)
                 self.labelCount[fiber.label] += 1
                 self.pozX[fiber.label].append(centroidy)
                 self.pozY[fiber.label].append(centroidx)
+                if orientation:
+                    self.orientation[fiber.label].append(orientation[i])
+                else:
+                    self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
 
             # rouding the centroid position and creating string
             centroidx = str(np.round(centroidx,decimals = 2))
             centroidy = str(np.round(centroidy,decimals = 2))
 
-
             if orientation:
+                # create data to put into table
                 datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i])]
             else:
                 orient = str(np.round(math.pi/2 + fiber.orientation,decimals = 2))
@@ -1488,10 +1423,10 @@ class AppWidget(QtWidgets.QMainWindow):
 
             # add the data into the table
             for j, data in enumerate(datas):
-                self.objectPropertiesTable.setItem(rowCount-1, j, QtWidgets.QTableWidgetItem(data))
+                self.objectPropertiesTable.setItem(rowCount, j, QtWidgets.QTableWidgetItem(data))
                 self.objectPropertiesTable.scrollToBottom()
             rowCount += 1
-
+        print(rowCount)
         self.uniqueLabel.sort()
 
     def updatePosition(self, index):
@@ -1533,7 +1468,7 @@ class AppWidget(QtWidgets.QMainWindow):
             self.errorWarning.setText("You have to enter positive integer value!")
             return self.popup()
 
-        # enabeling/diableling stop/start buttons and table buttons
+        # enabling/disabling stop/start buttons and table buttons
         self.startTrackingButton.setEnabled(False)
         self.stopTrackingButton.setEnabled(True)
         self.tableButtonsGroupBox.setEnabled(False)
@@ -1632,9 +1567,9 @@ class AppWidget(QtWidgets.QMainWindow):
                     predictionX += x1 - x0
                     predictionNormX = np.divide(predictionX, count-1)
 
-                    if abs(x1+predictionNormX-x2)<(predictionNormX*0.2) and count + currentRow < self.objectPropertiesTable.rowCount():
+                    if abs(x1+predictionNormX-x2)<(predictionNormX*0.2):
                         self.objectPropertiesTable.item(count + currentRow,2).setBackground(QColor('yellow'))
-                    elif count + currentRow < self.objectPropertiesTable.rowCount():
+                    else:
                         if label not in deleteList: deleteList.append(label)
                         self.objectPropertiesTable.item(count + currentRow,2).setBackground(QColor('red'))
                     x0 = x1
@@ -1645,7 +1580,7 @@ class AppWidget(QtWidgets.QMainWindow):
 
                     if abs(y1+predictionNormY-y2)<(predictionNormY*0.5):
                         self.objectPropertiesTable.item(count + currentRow,3).setBackground(QColor('yellow'))
-                    elif count + currentRow < self.objectPropertiesTable.rowCount():
+                    else:
                         if label not in deleteList: deleteList.append(label)
                         self.objectPropertiesTable.item(count + currentRow,3).setBackground(QColor('red'))
                     y0 = y1
@@ -1661,12 +1596,9 @@ class AppWidget(QtWidgets.QMainWindow):
                     self.objectPropertiesTable.item(count + currentRow,2).setBackground(QColor('yellow'))
                     self.objectPropertiesTable.item(count + currentRow,3).setBackground(QColor('yellow'))
 
-
-
             currentRow += self.labelCount[label]
             predictionX = 0
             predictionY = 0
-
 
         deleteLabel = []
         # posibility to delete data of labels where the values were not in the tolerance
@@ -1690,20 +1622,40 @@ class AppWidget(QtWidgets.QMainWindow):
     def plotResutlts(self):
         # perform cubic spline interpolation of the data
         for label in self.uniqueLabel:
-            splineX = interp1d(self.pozX[label], self.pozY[label], kind = 'cubic')
-            splineY = interp1d(self.pozY[label], self.pozX[label], kind = 'cubic')
-            xnew = np.linspace(min(self.pozX[label]), max(self.pozX[label]), 100)
-            ynew = np.linspace(min(self.pozY[label]), max(self.pozY[label]), 100)
-            # plot the data
-            plt.plot(self.pozX[label], self.pozY[label], 'x', xnew, splineX(xnew), '-', splineY(ynew), splineX(xnew), '.-')
-        axes= plt.gca()
+            fig, ax = plt.subplots()
+            axes= plt.gca()
+            # changing the axis range and position
+            axes.set_xlim([0,1024])
+            axes.set_ylim([max(self.pozY[label]) + 1,min(self.pozY[label]) -1])
+            axes.xaxis.tick_top()
+            axes.yaxis.tick_left()
+            points = np.array([self.pozX[label],self.pozY[label]]).T
+            distance = np.cumsum( np.sqrt(np.sum( np.diff(points, axis=0)**2, axis=1 )) )
+            distance = np.insert(distance, 0, 0)/distance[-1]
+            alpha = np.linspace(0, 1, 75)
 
-        # changing the axis range and position
-        axes.set_xlim([0,1024])
-        axes.set_ylim([1024,0])
-        axes.xaxis.tick_top()
-        axes.yaxis.tick_left()
+            splineX = interp1d(distance, points, kind = 'cubic', axis = 0)
+            interpolated_points = splineX(alpha)
+            plt.plot(*points.T,'x', *interpolated_points.T, '-', label=label);
+
         # show the plot
+        plt.show()
+
+    def plotOrientation(self):
+        for i, label in enumerate(self.uniqueLabel):
+            fig, ax = plt.subplots()
+            unit = 0.5
+            yTick = np.arange (0, 2+unit, unit)
+            yLabel = [r"$0$", r"$\frac{\pi}{2}$", r"$\pi$", r"$\frac{3\pi}{2}$",  r"$2\pi}$"]
+            axes = plt.gca()
+            axes.set_ylim([0,2*math.pi])
+            axes.set_yticks(yTick*np.pi)
+            ax.set_yticklabels(yLabel)
+            splineX = interp1d(self.pozX[label], self.orientation[label], kind = 'cubic')
+            newX = np.linspace(min(self.pozX[label]),max(self.pozX[label]), 100)
+            interpolated_points = splineX(newX)
+            plt.plot(self.pozX[label], self.orientation[label], 'x', newX, interpolated_points,'-')
+
         plt.show()
 
     def closeApp(self):
