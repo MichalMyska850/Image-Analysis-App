@@ -53,6 +53,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.pozY = [[] for x in range(100)]
         self.orientation = [[] for x in range(100)]
         self.pixmap = None
+        self.changedLabels = {}
 
         self.lowThresh = None
         self.highThresh = None
@@ -649,6 +650,7 @@ class AppWidget(QtWidgets.QMainWindow):
     #also enables adittional button
     def openImages(self):
         # importing paths of images
+        self.images = []
         imagePaths, _ = QFileDialog.getOpenFileNames(
             self, 'Open Images', "C:/Users/Michal/Documents/Škola/Diplomka/src/data/Vlakna_DP/Vlakna_DP", '*.tif')
 
@@ -731,7 +733,7 @@ class AppWidget(QtWidgets.QMainWindow):
         index = self.pathsList.currentRow()
 
         if self.currentState == "Contrast":
-            self.currentImage = self.images[index].loadImage()
+            self.images[index].loadImage()
             self.contrast()
 
         elif self.currentState == "Median Background":
@@ -1350,6 +1352,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.pozX = [[] for x in range(100)]
         self.pozY = [[] for x in range(100)]
         self.orientation = [[] for x in range(100)]
+        self.changedLabels = {}
 
         # enable properties table and tracking button
         self.objectPropertiesTable.setEnabled(True)
@@ -1374,41 +1377,87 @@ class AppWidget(QtWidgets.QMainWindow):
     def tableUpdate(self, objectProperties, orientation = None):
         # counting all the rows
         rowCount = self.objectPropertiesTable.rowCount()
-        if rowCount == 1:
+        if rowCount == 1 and self.objectPropertiesTable.item(0,0) == None:
             self.objectPropertiesTable.removeRow(0)
         rowCount = self.objectPropertiesTable.rowCount()
-        print(rowCount)
         self.objectProperties = objectProperties
         # creating list of data
         datas = ['']*len(self.labels)
 
         # iteration over all the obects in given objectProperties
         for i, (fiber,color) in enumerate(zip(objectProperties, self.colors)):
+            label = None
             # create a new row in the table
             self.objectPropertiesTable.insertRow(rowCount)
             # get centroid position of the current object
             centroidx, centroidy = fiber.centroid
+            if len(self.pozX[fiber.label]) > 0:
+                if self.pozX[fiber.label][-1] - centroidy > 100 or self.pozY[fiber.label][-1] - centroidx >50:
+                    if fiber.label in self.changedLabels:
+                        label = self.changedLabels[fiber.label]
+                        self.labelCount[label] += 1
+                        # update position list of specific object
+                        self.pozX[label].append(centroidy)
+                        self.pozY[label].append(centroidx)
+                        if orientation:
+                            self.orientation[label].append(orientation[i])
+                        else:
+                            self.orientation[label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                    else:
+                        label = max(self.uniqueLabel) + 1
+                        self.uniqueLabel.append(label)
+                        self.changedLabels[fiber.label] = label
+                        self.labelCount[label] += 1
+                        # update position list of specific object
+                        self.pozX[label].append(centroidy)
+                        self.pozY[label].append(centroidx)
+                        if orientation:
+                            self.orientation[label].append(orientation[i])
+                        else:
+                            self.orientation[label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
 
-            if fiber.label in self.uniqueLabel:
-                # count number of records for specific label
-                self.labelCount[fiber.label] += 1
-                # update position list of specific object
-                self.pozX[fiber.label].append(centroidy)
-                self.pozY[fiber.label].append(centroidx)
-                if orientation:
-                    self.orientation[fiber.label].append(orientation[i])
                 else:
-                    self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                    if fiber.label in self.uniqueLabel:
+                        # count number of records for specific label
+                        self.labelCount[fiber.label] += 1
+                        # update position list of specific object
+                        self.pozX[fiber.label].append(centroidy)
+                        self.pozY[fiber.label].append(centroidx)
+                        if orientation:
+                            self.orientation[fiber.label].append(orientation[i])
+                        else:
+                            self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                    else:
+                        # add new label to the list of labels in table
+                        self.uniqueLabel.append(fiber.label)
+                        self.labelCount[fiber.label] += 1
+                        self.pozX[fiber.label].append(centroidy)
+                        self.pozY[fiber.label].append(centroidx)
+                        if orientation:
+                            self.orientation[fiber.label].append(orientation[i])
+                        else:
+                            self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
             else:
-                # add new label to the list of labels in table
-                self.uniqueLabel.append(fiber.label)
-                self.labelCount[fiber.label] += 1
-                self.pozX[fiber.label].append(centroidy)
-                self.pozY[fiber.label].append(centroidx)
-                if orientation:
-                    self.orientation[fiber.label].append(orientation[i])
-                else:
-                    self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                    if fiber.label in self.uniqueLabel:
+                        # count number of records for specific label
+                        self.labelCount[fiber.label] += 1
+                        # update position list of specific object
+                        self.pozX[fiber.label].append(centroidy)
+                        self.pozY[fiber.label].append(centroidx)
+                        if orientation:
+                            self.orientation[fiber.label].append(orientation[i])
+                        else:
+                            self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                    else:
+                        # add new label to the list of labels in table
+                        self.uniqueLabel.append(fiber.label)
+                        self.labelCount[fiber.label] += 1
+                        self.pozX[fiber.label].append(centroidy)
+                        self.pozY[fiber.label].append(centroidx)
+                        if orientation:
+                            self.orientation[fiber.label].append(orientation[i])
+                        else:
+                            self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
 
             # rouding the centroid position and creating string
             centroidx = str(np.round(centroidx,decimals = 2))
@@ -1416,17 +1465,22 @@ class AppWidget(QtWidgets.QMainWindow):
 
             if orientation:
                 # create data to put into table
-                datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i])]
+                if fiber.label in self.changedLabels:
+                    datas = [str(self.changedLabels[fiber.label]),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i])]
+                else:
+                    datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i])]
             else:
                 orient = str(np.round(math.pi/2 + fiber.orientation,decimals = 2))
-                datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),orient]
+                if fiber.label in self.changedLabels:
+                    datas = [str(self.changedLabels[fiber.label]),str(color),centroidy,centroidx,str(fiber.area),orient]
+                else:
+                    datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),orient]
 
             # add the data into the table
             for j, data in enumerate(datas):
                 self.objectPropertiesTable.setItem(rowCount, j, QtWidgets.QTableWidgetItem(data))
                 self.objectPropertiesTable.scrollToBottom()
             rowCount += 1
-        print(rowCount)
         self.uniqueLabel.sort()
 
     def updatePosition(self, index):
@@ -1503,12 +1557,23 @@ class AppWidget(QtWidgets.QMainWindow):
 
     def deleteRow(self, label = None):
         # deletes selected row/s from the table
+        indices = None
+        rowCount = None
+
         if label == False:
             # getting the indices of the selected rows
-            indexes = self.objectPropertiesTable.selectionModel().selectedRows()
-            for ind in indexes:
-                print(ind.row())
+            indices = self.objectPropertiesTable.selectionModel().selectedRows()
+            for ind in indices:
+                fiber = int(self.objectPropertiesTable.item(ind.row(),0 ).text())
+                rowCount = ind.row()
+                for label in self.uniqueLabel:
+                    if label < fiber:
+                        rowCount -= self.labelCount[label]
+                # delete the data from the positions list
+                del self.pozX[fiber][rowCount]
+                del self.pozY[fiber][rowCount]
                 self.objectPropertiesTable.removeRow(ind.row())
+
         # delete rows with specific label number
         else:
             indices = self.objectPropertiesTable.findItems(str(label), QtCore.Qt.MatchExactly)
@@ -1626,13 +1691,24 @@ class AppWidget(QtWidgets.QMainWindow):
             axes= plt.gca()
             # changing the axis range and position
             axes.set_xlim([0,1024])
-            axes.set_ylim([max(self.pozY[label]) + 1,min(self.pozY[label]) -1])
+            maxTick = None
+            minTick = None
+            if min(self.pozY[label]) -50 < 0:
+                maxTick = 0
+            else:
+                maxTick = min(self.pozY[label]) -50
+            if max(self.pozY[label]) + 50 > 1024:
+                minTick = 1024
+            else:
+                minTick = max(self.pozY[label]) + 50
+
+            axes.set_ylim([minTick,maxTick])
             axes.xaxis.tick_top()
             axes.yaxis.tick_left()
             points = np.array([self.pozX[label],self.pozY[label]]).T
             distance = np.cumsum( np.sqrt(np.sum( np.diff(points, axis=0)**2, axis=1 )) )
             distance = np.insert(distance, 0, 0)/distance[-1]
-            alpha = np.linspace(0, 1, 75)
+            alpha = np.linspace(0, 1, 200)
 
             splineX = interp1d(distance, points, kind = 'cubic', axis = 0)
             interpolated_points = splineX(alpha)
@@ -1652,7 +1728,7 @@ class AppWidget(QtWidgets.QMainWindow):
             axes.set_yticks(yTick*np.pi)
             ax.set_yticklabels(yLabel)
             splineX = interp1d(self.pozX[label], self.orientation[label], kind = 'cubic')
-            newX = np.linspace(min(self.pozX[label]),max(self.pozX[label]), 100)
+            newX = np.linspace(min(self.pozX[label]),max(self.pozX[label]), 200)
             interpolated_points = splineX(newX)
             plt.plot(self.pozX[label], self.orientation[label], 'x', newX, interpolated_points,'-')
 
