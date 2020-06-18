@@ -78,7 +78,7 @@ class Image():
         # apply median filter
         kernel = skimage.morphology.square(5)
         self.subtractImg = skimage.filters.median(subtract, kernel)
-
+        self.neighborhoodImages = []
         return self.subtractImg
 
     def threshold(self, thresh):
@@ -91,7 +91,7 @@ class Image():
 
     def dilation(self):
 
-        kernel = skimage.morphology.square(5)
+        kernel = skimage.morphology.square(3)
         # apply opening to get rid of small objects
         opening = skimage.morphology.opening(self.thresholdedImage, kernel)
 
@@ -128,6 +128,7 @@ class Image():
         # change the values of mean background to median background on positions where created mask == 0
         self.meanBG = np.where(self.mask == 0, self.meanBG, self.medianBG)
 
+        self.neighborhoodImages = []
         return self.meanBG
 
     def imageDivision(self):
@@ -159,11 +160,6 @@ class Image():
         # apply one of the automatic thresholding method
         if method == 'Otsu':
             threshold = skimage.filters.threshold_otsu(image)
-            foreground = image < threshold
-            self.segmentImg = foreground * 1
-
-        elif method == 'Yen':
-            threshold = skimage.filters.threshold_yen(image)
             foreground = image < threshold
             self.segmentImg = foreground * 1
 
@@ -208,24 +204,18 @@ class Image():
 
     def edgesFilling(self):
         # filles the edges created by one of the methods
-        filled = ndi.binary_fill_holes(self.sobelImage) * 1
+        self.segmentImg = ndi.binary_fill_holes(self.sobelImage) * 1
 
-        return filled
-
-    def kmeans(self, img, segments, sigma, iterations, compact):
-
-        self.segmentImg = skimage.segmentation.slic(
-            img, n_segments=segments, sigma=sigma, compactness=compact, max_iter=iterations)
         return self.segmentImg
 
-    def labelling(self):
+    def labelling(self, size):
         color = ('blue', 'cyan', 'darkorange', 'indigo',
                  'magenta', 'pink', 'red', 'yellow', 'yellowgreen')
         # fill holes in the objects
         filledHoles = ndi.binary_fill_holes(self.segmentImg)
         # remove objects smaller than 50 px
         labels = skimage.morphology.remove_small_objects(
-            filledHoles, min_size=50)
+            filledHoles, min_size=size)
         # clear borders of any unwanted pixels
         borders = skimage.segmentation.clear_border(labels)
 
