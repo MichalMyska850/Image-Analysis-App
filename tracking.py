@@ -8,14 +8,16 @@ import math
 
 class Tracking(QThread):
 
-    resultTable = pyqtSignal(object, object)
+    resultTable = pyqtSignal(object, object, object)
     resultImage = pyqtSignal(object)
     currentIndex = pyqtSignal(object)
     errorEmit = pyqtSignal(object)
     zeroCross = []
+    sameLabelAlive = None
+    propertiesNew = None
 
     def __init__(self, images, index, properties, neigbrhoodSize, filterType, thresh, kernel, sigma, sigmaC, sigmaS,
-                 segmentType, manThreshold, sigmaCanny, windowSizeX, windowSizeY, lowThresh, highThresh):
+                 segmentType, manThreshold, sigmaCanny, windowSizeX, windowSizeY, lowThresh, highThresh, size, kernelSize, method):
 
         QThread.__init__(self)
         self.images = images
@@ -36,30 +38,36 @@ class Tracking(QThread):
         self.lowThresh = lowThresh
         self.highThresh = highThresh
         self.dividedFiber = True
+        self.size = size
+        self.kernelSize = kernelSize
+        self.autoMethod = method
 
         self.color = ('blue', 'cyan', 'darkorange', 'indigo',
                       'magenta', 'pink', 'red', 'yellow', 'yellowgreen')
         self.alive = True
         self.properties = properties
-        self.propertiesNew = None
         self.changedThresh = manThreshold
 
     def run(self):
-        currentImage, currentImageProperties, orientation = self.sameLabel()
+        if Tracking.sameLabelAlive == None:
+            currentImage, currentImageProperties, orientation, ellongation = self.sameLabel()
 
         # checking if the button stop wasn't pressed
-        if self.alive:
+        if self.alive and Tracking.sameLabelAlive == None:
             self.index += 1
             error = False
             # emiting results from second thread to the UI
             self.resultImage.emit(currentImage)
-            self.resultTable.emit(currentImageProperties, orientation)
+            self.resultTable.emit(currentImageProperties,
+                                  orientation, ellongation)
             self.currentIndex.emit(self.index)
             self.errorEmit.emit(error)
+            Tracking.sameLabelAlive = True
 
-        else:
+        elif not self.alive and Tracking.sameLabelAlive == None:
             error = True
             self.errorEmit.emit(error)
+            Tracking.sameLabelAlive = True
 
         while self.alive:
             self.dividedFiber = True
@@ -68,7 +76,7 @@ class Tracking(QThread):
                 values = self.positionPredic()
             self.index += 1
             self.resultImage.emit(values[0])
-            self.resultTable.emit(values[1], values[2])
+            self.resultTable.emit(values[1], values[2], values[3])
             self.currentIndex.emit(self.index)
 
     def sameLabel(self):
@@ -77,19 +85,40 @@ class Tracking(QThread):
         const = 10
         labels = []
         newLabels = []
+        print('I am here')
 
         for objectLabel in self.properties:
             labels.append(objectLabel.label)
 
         for newObjectLabel in labeledImageProperties:
             newLabels.append(newObjectLabel.label)
+        maxRow, maxCol = labeledImage.shape
 
         # iteration over all objects
         for fiber in self.properties:
             window = fiber.bbox
+            if window[0] - self.windowSizeY < 0:
+                minRowBound = 0
+            else:
+                minRowBound = window[0] - self.windowSizeY
+
+            if window[2] + self.windowSizeY > maxRow:
+                maxRowBound = maxRow
+            else:
+                maxRowBound = window[2] + self.windowSizeY
+
+            if window[1] - self.widowSizeX < 0:
+                minColBound = 0
+            else:
+                minColBound = window[1] - self.widowSizeX
+
+            if window[3] + self.widowSizeX > maxCol:
+                maxColBound = maxCol
+            else:
+                maxColBound = window[3] + self.widowSizeX
             # finding unique values in bounding box of every object in the new image
             unique = np.unique(
-                labeledImage[window[0] - self.windowSizeY:window[2] + self.windowSizeY, window[1] - self.widowSizeX:window[3] + self.widowSizeX])
+                labeledImage[minRowBound: maxRowBound, minColBound: maxColBound])
             # remove 0 from the unique - there will always be 0 due to black background
             if len(unique) != 0:
                 unique = np.delete(unique, 0)
@@ -116,7 +145,7 @@ class Tracking(QThread):
         n = np.abs(np.subtract(len(labels), len(newLabels)))
 
         labeledImage = skimage.morphology.remove_small_objects(
-            labeledImage, min_size=100)
+            labeledImage, min_size=self.size)
         # changing the labels that were change to len(label) + const to the end of current labels
         for i in range(10, const):
             labeledImage = np.where(labeledImage == len(
@@ -126,7 +155,7 @@ class Tracking(QThread):
         colorLabel = skimage.color.label2rgb(
             labeledImage, colors=self.color, bg_label=0)
         # count properties of objects
-        self.propertiesNew = skimage.measure.regionprops(labeledImage)
+        Tracking.propertiesNew = skimage.measure.regionprops(labeledImage)
 
         labels = []
         newLabels = []
@@ -134,52 +163,59 @@ class Tracking(QThread):
         for objectLabel in self.properties:
             labels.append(objectLabel.label)
 
-        for newObjectLabel in self.propertiesNew:
+        for newObjectLabel in Tracking.propertiesNew:
             newLabels.append(newObjectLabel.label)
 
         intersection = np.intersect1d(labels, newLabels)
 
         indices = [labels.index(x) for x in intersection]
         indicesNew = [newLabels.index(x) for x in intersection]
-        orientation = [0] * len(self.propertiesNew)
+        orientation = [0] * len(Tracking.propertiesNew)
 
         # count orientation of object because originaly we get values from -PI/2 to PI/2 but we want the values from 0 to 2PI
         # parameter Tracking.zereCross include the labels which cross 0
         for index, indexNew in zip(indices, indicesNew):
-            if self.propertiesNew[indexNew].orientation + math.pi / 2 > (math.pi / 2) and self.properties[index].orientation + math.pi / 2 < (math.pi / 2) and (self.propertiesNew[indexNew].orientation + math.pi / 2) - (self.properties[index].orientation + math.pi / 2) > math.pi / 2:
+            if Tracking.propertiesNew[indexNew].orientation + math.pi / 2 > (math.pi / 2) and self.properties[index].orientation + math.pi / 2 < (math.pi / 2) and (Tracking.propertiesNew[indexNew].orientation + math.pi / 2) - (self.properties[index].orientation + math.pi / 2) > math.pi / 2:
 
                 if newLabels[indexNew] in Tracking.zeroCross:
                     Tracking.zeroCross.remove(newLabels[indexNew])
                 else:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
                     Tracking.zeroCross.append(newLabels[indexNew])
 
-            elif self.propertiesNew[indexNew].orientation + math.pi / 2 < (math.pi / 2) and self.properties[index].orientation + math.pi / 2 > (math.pi / 2) and (self.properties[index].orientation + math.pi / 2) - (self.propertiesNew[indexNew].orientation + math.pi / 2) > math.pi / 2:
+            elif Tracking.propertiesNew[indexNew].orientation + math.pi / 2 < (math.pi / 2) and self.properties[index].orientation + math.pi / 2 > (math.pi / 2) and (self.properties[index].orientation + math.pi / 2) - (Tracking.propertiesNew[indexNew].orientation + math.pi / 2) > math.pi / 2:
 
                 if newLabels[indexNew] in Tracking.zeroCross:
                     Tracking.zeroCross.remove(newLabels[indexNew])
                 else:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
                     Tracking.zeroCross.append(newLabels[indexNew])
 
             elif newLabels[indexNew] in Tracking.zeroCross:
 
-                if self.propertiesNew[indexNew].orientation + math.pi / 2 < math.pi / 2:
+                if Tracking.propertiesNew[indexNew].orientation + math.pi / 2 < math.pi / 2:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
                 else:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
 
         # if the orientation of curtain label is not filled (is 0) we give it value we got from properties, unchanged
-        for i, fiber in enumerate(self.propertiesNew):
+        for i, fiber in enumerate(Tracking.propertiesNew):
             if orientation[i] == 0:
                 orientation[i] = np.round(
                     fiber.orientation + math.pi / 2, decimals=2)
 
-        return colorLabel, self.propertiesNew, orientation
+        ellongation = [0] * len(Tracking.propertiesNew)
+        for i, fiber in enumerate(Tracking.propertiesNew):
+            majorA = fiber.major_axis_length
+            minorA = fiber.minor_axis_length
+
+            ellongation[i] = np.round(math.log2(majorA / minorA), decimals=2)
+
+        return colorLabel, Tracking.propertiesNew, orientation, ellongation
 
     def positionPredic(self):
         # this process is similar to the one in method sameLabel
@@ -191,7 +227,7 @@ class Tracking(QThread):
         for objectLabel in self.properties:
             labels.append(objectLabel.label)
 
-        for newObjectLabel in self.propertiesNew:
+        for newObjectLabel in Tracking.propertiesNew:
             newLabels.append(newObjectLabel.label)
 
         intersection = np.intersect1d(labels, newLabels)
@@ -200,16 +236,17 @@ class Tracking(QThread):
         indicesNew = [newLabels.index(x) for x in intersection]
 
         for index, indexNew in zip(indices, indicesNew):
-            window = self.propertiesNew[indexNew].bbox
+            window = Tracking.propertiesNew[indexNew].bbox
 
             # only difference is here, were we get a centroid positions
             centroidY, centroidX = self.properties[index].centroid
-            centroidYNew, centroidXNew = self.propertiesNew[indexNew].centroid
+            centroidYNew, centroidXNew = Tracking.propertiesNew[indexNew].centroid
 
             positionX = int(
                 np.round(centroidXNew - centroidX, decimals=0))
             positionY = int(
                 np.round(centroidYNew - centroidY, decimals=0))
+
             # and move the bounding bo windows by difference of those centroids
             unique = np.unique(
                 labeledImage[window[0] + positionY:window[2] + positionY, window[1] + positionX:window[3] + positionX])
@@ -236,7 +273,7 @@ class Tracking(QThread):
         self.dividedFiber = False
         self.manThreshold = self.changedThresh
         labeledImage = skimage.morphology.remove_small_objects(
-            labeledImage, min_size=100)
+            labeledImage, min_size=self.size)
 
         n = np.abs(np.subtract(len(labeledImageProperties), len(newLabels)))
 
@@ -248,8 +285,8 @@ class Tracking(QThread):
 
         colorLabel = skimage.color.label2rgb(
             labeledImage, colors=self.color, bg_label=0)
-        self.properties = self.propertiesNew
-        self.propertiesNew = skimage.measure.regionprops(labeledImage)
+        self.properties = Tracking.propertiesNew
+        Tracking.propertiesNew = skimage.measure.regionprops(labeledImage)
 
         labels = []
         newLabels = []
@@ -257,46 +294,53 @@ class Tracking(QThread):
         for objectLabel in self.properties:
             labels.append(objectLabel.label)
 
-        for newObjectLabel in self.propertiesNew:
+        for newObjectLabel in Tracking.propertiesNew:
             newLabels.append(newObjectLabel.label)
 
         intersection = np.intersect1d(labels, newLabels)
 
         indices = [labels.index(x) for x in intersection]
         indicesNew = [newLabels.index(x) for x in intersection]
-        orientation = [0] * len(self.propertiesNew)
+        orientation = [0] * len(Tracking.propertiesNew)
 
         for index, indexNew in zip(indices, indicesNew):
-            if self.propertiesNew[indexNew].orientation + math.pi / 2 > math.pi / 2 and self.properties[index].orientation + math.pi / 2 < math.pi / 2 and (self.propertiesNew[indexNew].orientation + math.pi / 2) - (self.properties[index].orientation + math.pi / 2) > math.pi / 2:
+            if Tracking.propertiesNew[indexNew].orientation + math.pi / 2 > math.pi / 2 and self.properties[index].orientation + math.pi / 2 < math.pi / 2 and (Tracking.propertiesNew[indexNew].orientation + math.pi / 2) - (self.properties[index].orientation + math.pi / 2) > math.pi / 2:
                 if newLabels[indexNew] in Tracking.zeroCross:
                     Tracking.zeroCross.remove(newLabels[indexNew])
                 else:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
                     Tracking.zeroCross.append(newLabels[indexNew])
 
-            elif self.propertiesNew[indexNew].orientation + math.pi / 2 < math.pi / 2 and self.properties[index].orientation + math.pi / 2 > math.pi / 2 and (self.properties[index].orientation + math.pi / 2) - (self.propertiesNew[indexNew].orientation + math.pi / 2) > math.pi / 2:
+            elif Tracking.propertiesNew[indexNew].orientation + math.pi / 2 < math.pi / 2 and self.properties[index].orientation + math.pi / 2 > math.pi / 2 and (self.properties[index].orientation + math.pi / 2) - (Tracking.propertiesNew[indexNew].orientation + math.pi / 2) > math.pi / 2:
                 if newLabels[indexNew] in Tracking.zeroCross:
                     Tracking.zeroCross.remove(newLabels[indexNew])
                 else:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
                     Tracking.zeroCross.append(newLabels[indexNew])
 
             elif newLabels[indexNew] in Tracking.zeroCross:
-                if self.propertiesNew[indexNew].orientation + math.pi / 2 < math.pi / 2:
+                if Tracking.propertiesNew[indexNew].orientation + math.pi / 2 < math.pi / 2:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
                 else:
                     orientation[indexNew] = np.round(
-                        self.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
+                        Tracking.propertiesNew[indexNew].orientation + 3 * math.pi / 2, decimals=2)
 
-        for i, fiber in enumerate(self.propertiesNew):
+        for i, fiber in enumerate(Tracking.propertiesNew):
             if orientation[i] == 0:
                 orientation[i] = np.round(
                     fiber.orientation + math.pi / 2, decimals=2)
 
-        return colorLabel, self.propertiesNew, orientation
+        ellongation = [0] * len(Tracking.propertiesNew)
+        for i, fiber in enumerate(Tracking.propertiesNew):
+            majorA = fiber.major_axis_length
+            minorA = fiber.minor_axis_length
+
+            ellongation[i] = np.round(math.log2(majorA / minorA), decimals=2)
+
+        return colorLabel, Tracking.propertiesNew, orientation, ellongation
 
     # creates binary image with settings from preprocessing
 
@@ -322,7 +366,7 @@ class Tracking(QThread):
             imgFilt = medianFilter.process(img.divisionImg, self.kernel)
 
         elif self.filter == "Mean Filter":
-            imgFilt = meanFilter.process(img.divisionImg, self.kernel)
+            imgFilt = meanFilter.process(img.divisionImg, self.kernelSize)
 
         elif self.filter == "Gauss Filter":
             imgFilt = gaussFilter.process(img.divisionImg, self.sigma)
@@ -330,6 +374,8 @@ class Tracking(QThread):
         elif self.filter == "Bilateral Filter":
             imgFilt = bilateralFilter.process(
                 img.divisionImg, self.sigmaColor, self.sigmaSpatial)
+        elif self.filter == "Maximum Filter":
+            imgFilt = maxFilter.process(img.divisionImg, self.kernelSize)
 
         # segmentation
 
@@ -337,11 +383,10 @@ class Tracking(QThread):
             img.thresholdSegment(imgFilt, self.manThreshold)
 
         elif self.segmentationTech == "Automatic Thresh":
-            img.yenThreshold(imgFilt)
+            img.autoThresh(self.autoMethod, imgFilt)
 
         elif self.segmentationTech == "Edge Operators":
-            img.sobel(imgFilt)
-            img.watershed()
+            img.edges(self.autoMethod, imgFilt)
 
         elif self.segmentationTech == "Canny Edge Detector":
 
@@ -351,7 +396,7 @@ class Tracking(QThread):
 
         # Labelling
 
-        return img.labelling()
+        return img.labelling(self.size)
 
     # triggered when button is pressed
     def stop(self):
