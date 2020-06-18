@@ -1,30 +1,24 @@
 from image import Image
-from filter import medianFilter, meanFilter, gaussFilter, bilateralFilter
+from filter import medianFilter, meanFilter, gaussFilter, bilateralFilter, maxFilter
 from table import Table
 from background import Background
 from tracking import Tracking
 
 import sys
-import time
-
 from PyQt5.QtCore import pyqtSlot, pyqtSignal, QThread
 from PyQt5.QtWidgets import QApplication, QWidget, QPushButton, QDialog, QHBoxLayout, QVBoxLayout, QGroupBox
 from PyQt5 import QtCore, QtGui, QtWidgets
 import skimage.io
 from PyQt5.QtWidgets import QFileDialog
-from PyQt5.QtGui import QIcon, QPixmap, QImage, QColor
+from PyQt5.QtGui import QPixmap, QColor
 from qimage2ndarray import array2qimage, gray2qimage
 import skimage
 from skimage.restoration import denoise_bilateral
 from skimage import morphology
-from decimal import *
 import math
 from openpyxl import Workbook
-from skimage.util import img_as_uint, img_as_ubyte
 import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
-from tifffile import imsave
-
 import numpy as np
 
 
@@ -33,7 +27,7 @@ class AppWidget(QtWidgets.QMainWindow):
     def __init__(self):
         QWidget.__init__(self)
         self.resize(1920, 1080)
-        self.setWindowTitle("Object Segmentation")
+        self.setWindowTitle("Object Tracking")
 
         self.images = []
         self.index = None
@@ -46,12 +40,13 @@ class AppWidget(QtWidgets.QMainWindow):
         self.currentState = "Contrast"
         self.colors = ('blue', 'cyan', 'darkorange', 'indigo',
                  'magenta', 'pink', 'red', 'yellow', 'yellowgreen')
-        self.labels = ["Label","Color","CentroiX","CentroidY","Area","Orientation"]
+        self.labels = ["Label","Color","CentroiX","CentroidY","Area","Orientation", "Ellongation"]
         self.uniqueLabel = []
         self.labelCount = [0] * 100
         self.pozX = [[] for x in range(100)]
         self.pozY = [[] for x in range(100)]
         self.orientation = [[] for x in range(100)]
+        self.ellongation = [[] for x in range(100)]
         self.pixmap = None
         self.changedLabels = {}
 
@@ -70,6 +65,9 @@ class AppWidget(QtWidgets.QMainWindow):
         self.imgFiltNorm = None
         self.lowThresh = None
         self.highThresh = None
+        self.size = None
+        self.sizeKernel = None
+        self.autoMethod = None
 
         self.objectProperties = []
 
@@ -157,7 +155,7 @@ class AppWidget(QtWidgets.QMainWindow):
 
         self.verticalLayoutWidget_2 = QtWidgets.QWidget(
             self.backgroundGroupBox)
-        self.verticalLayoutWidget_2.setGeometry(QtCore.QRect(10, 40, 410, 71))
+        self.verticalLayoutWidget_2.setGeometry(QtCore.QRect(10, 40, 390, 71))
         self.verticalLayoutWidget_2.setObjectName("verticalLayoutWidget_2")
 
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(
@@ -174,7 +172,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.backgroundSlider.sliderReleased.connect(self.thresholdBackground)
 
         self.thresholdWindow = QtWidgets.QLineEdit(self.backgroundGroupBox)
-        self.thresholdWindow.setGeometry(QtCore.QRect(430, 65, 30, 20))
+        self.thresholdWindow.setGeometry(QtCore.QRect(410, 65, 50, 20))
         self.thresholdWindow.setObjectName("thresholdWindow")
         self.thresholdWindow.setEnabled(False)
 
@@ -233,41 +231,39 @@ class AppWidget(QtWidgets.QMainWindow):
         self.horizontalLayout.addWidget(self.sortTableButton)
         self.sortTableButton.clicked.connect(self.sortTable)
 
-        self.filterTableButton = QtWidgets.QPushButton(
-            "Filter", self.horizontalLayoutWidget)
-        self.filterTableButton.setObjectName("filterTableButton")
-        self.horizontalLayout.addWidget(self.filterTableButton)
-        self.filterTableButton.clicked.connect(self.filterTable)
-
-        self.deleteTableButton = QtWidgets.QPushButton(
-            "Delete", self.horizontalLayoutWidget)
-        self.deleteTableButton.setObjectName("deleteTableButton")
-        self.horizontalLayout.addWidget(self.deleteTableButton)
-        self.deleteTableButton.clicked.connect(self.deleteRow)
-
-        self.editTableButton = QtWidgets.QPushButton(
-            "Edit", self.horizontalLayoutWidget)
-        self.editTableButton.setObjectName("editTableButton")
-        self.horizontalLayout.addWidget(self.editTableButton)
-        self.editTableButton.clicked.connect(self.editTable)
-
         self.exportTableButton = QtWidgets.QPushButton(
             "Export", self.horizontalLayoutWidget)
         self.exportTableButton.setObjectName("exportTableButton")
         self.horizontalLayout.addWidget(self.exportTableButton)
         self.exportTableButton.clicked.connect(self.exportTable)
 
+        self.deleteTableButton = QtWidgets.QPushButton(
+            "Delete", self.horizontalLayoutWidget)
+        self.deleteTableButton.setObjectName("deleteTableButton")
+        self.horizontalLayout.addWidget(self.deleteTableButton)
+        self.deleteTableButton.clicked.connect(self.deleteRow)
+        self.deleteTableButton.setEnabled(False)
+
+        self.filterTableButton = QtWidgets.QPushButton(
+            "Filter", self.horizontalLayoutWidget)
+        self.filterTableButton.setObjectName("filterTableButton")
+        self.horizontalLayout.addWidget(self.filterTableButton)
+        self.filterTableButton.clicked.connect(self.filterTable)
+        self.filterTableButton.setEnabled(False)
+
         self.plotTableButton = QtWidgets.QPushButton(
-            "Plot", self.horizontalLayoutWidget)
+            "Plot Trajectory", self.horizontalLayoutWidget)
         self.plotTableButton.setObjectName("plotTableButton")
         self.horizontalLayout.addWidget(self.plotTableButton)
         self.plotTableButton.clicked.connect(self.plotResutlts)
+        self.plotTableButton.setEnabled(False)
 
         self.plotOrientationButton = QtWidgets.QPushButton(
-            "Plot", self.horizontalLayoutWidget)
+            "Plot Orientation", self.horizontalLayoutWidget)
         self.plotOrientationButton.setObjectName("plotOrientationButton")
         self.horizontalLayout.addWidget(self.plotOrientationButton)
         self.plotOrientationButton.clicked.connect(self.plotOrientation)
+        self.plotOrientationButton.setEnabled(False)
 
         ## Filter Group Box ##
 
@@ -277,17 +273,18 @@ class AppWidget(QtWidgets.QMainWindow):
         self.filterGroupBox.setEnabled(False)
 
         self.filterList = QtWidgets.QListWidget(self.filterGroupBox)
-        self.filterList.setGeometry(QtCore.QRect(10, 20, 100, 75))
+        self.filterList.setGeometry(QtCore.QRect(10, 20, 120, 75))
         self.filterList.setObjectName("filterList")
         self.filterList.addItem('Median Filter')
         self.filterList.addItem('Mean Filter')
         self.filterList.addItem('Gauss Filter')
         self.filterList.addItem('Bilateral Filter')
+        self.filterList.addItem('Maximum Filter')
         self.filterList.itemDoubleClicked.connect(self.filterPosition)
 
         self.medianFilterGroupBox = QtWidgets.QGroupBox(
             "Median Filter", self.filterGroupBox)
-        self.medianFilterGroupBox.setGeometry(QtCore.QRect(120, 15, 200, 110))
+        self.medianFilterGroupBox.setGeometry(QtCore.QRect(140, 15, 200, 110))
         self.medianFilterGroupBox.setObjectName("medianFilterGroupBox")
         self.medianFilterGroupBox.setVisible(False)
 
@@ -312,32 +309,21 @@ class AppWidget(QtWidgets.QMainWindow):
 
         self.meanFilterGroupBox = QtWidgets.QGroupBox(
             "Mean Filter", self.filterGroupBox)
-        self.meanFilterGroupBox.setGeometry(QtCore.QRect(120, 15, 200, 110))
+        self.meanFilterGroupBox.setGeometry(QtCore.QRect(140, 15, 200, 110))
         self.meanFilterGroupBox.setObjectName("meanFilterGroupBox")
         self.meanFilterGroupBox.setVisible(False)
 
-        self.meanFilterKernelGeometryLabel = QtWidgets.QLabel(
-            "Kernel shape: ", self.meanFilterGroupBox)
-        self.meanFilterKernelGeometryLabel.move(10, 25)
-
-        self.meanFilterKernelGeometry = QtWidgets.QComboBox(
-            self.meanFilterGroupBox)
-        self.meanFilterKernelGeometry.setGeometry(
-            QtCore.QRect(80, 22, 80, 20))
-        self.meanFilterKernelGeometry.addItem("Square")
-        self.meanFilterKernelGeometry.addItem("Disk")
-
         self.meanFilterKernelSizeLabel = QtWidgets.QLabel(
             "Kernel size: ", self.meanFilterGroupBox)
-        self.meanFilterKernelSizeLabel.move(10, 55)
+        self.meanFilterKernelSizeLabel.move(10, 25)
 
-        self.meanFilterKernelSize = QtWidgets.QLineEdit(
+        self.meanFilterKernelSize = QtWidgets.QLineEdit("5",
             self.meanFilterGroupBox)
-        self.meanFilterKernelSize.setGeometry(QtCore.QRect(80, 52, 80, 20))
+        self.meanFilterKernelSize.setGeometry(QtCore.QRect(80, 22, 80, 20))
 
         self.gaussFilterGroupBox = QtWidgets.QGroupBox(
             "Gauss Filter", self.filterGroupBox)
-        self.gaussFilterGroupBox.setGeometry(QtCore.QRect(120, 15, 200, 110))
+        self.gaussFilterGroupBox.setGeometry(QtCore.QRect(140, 15, 200, 110))
         self.gaussFilterGroupBox.setObjectName("gaussFilterGroupBox")
         self.gaussFilterGroupBox.setVisible(False)
 
@@ -345,14 +331,14 @@ class AppWidget(QtWidgets.QMainWindow):
             "Sigma: ", self.gaussFilterGroupBox)
         self.gaussFilterSigmaValueLabel.move(10, 25)
 
-        self.gaussFilterSigmaValue = QtWidgets.QLineEdit(
+        self.gaussFilterSigmaValue = QtWidgets.QLineEdit("2",
             self.gaussFilterGroupBox)
         self.gaussFilterSigmaValue.setGeometry(QtCore.QRect(80, 22, 80, 20))
 
         self.bilateralFilterGroupBox = QtWidgets.QGroupBox(
             "Bilateral Filter", self.filterGroupBox)
         self.bilateralFilterGroupBox.setGeometry(
-            QtCore.QRect(120, 15, 200, 110))
+            QtCore.QRect(140, 15, 200, 110))
         self.bilateralFilterGroupBox.setObjectName("bilateralFilterGroupBox")
         self.bilateralFilterGroupBox.setVisible(False)
 
@@ -360,7 +346,7 @@ class AppWidget(QtWidgets.QMainWindow):
             "Intesity Sigma: ", self.bilateralFilterGroupBox)
         self.bilateralFilterSigmaCLabel.move(10, 25)
 
-        self.bilateralFilterSigmaCValue = QtWidgets.QLineEdit(
+        self.bilateralFilterSigmaCValue = QtWidgets.QLineEdit("0.2",
             self.bilateralFilterGroupBox)
         self.bilateralFilterSigmaCValue.setGeometry(
             QtCore.QRect(90, 22, 80, 20))
@@ -369,14 +355,28 @@ class AppWidget(QtWidgets.QMainWindow):
             "Spatial Sigma: ", self.bilateralFilterGroupBox)
         self.bilateralFilterSigmaSLabel.move(10, 55)
 
-        self.bilateralFilterSigmaSValue = QtWidgets.QLineEdit(
+        self.bilateralFilterSigmaSValue = QtWidgets.QLineEdit("2",
             self.bilateralFilterGroupBox)
         self.bilateralFilterSigmaSValue.setGeometry(
             QtCore.QRect(90, 52, 80, 20))
 
+        self.maximumFilterGB = QtWidgets.QGroupBox(
+            "Maximum Filter", self.filterGroupBox)
+        self.maximumFilterGB.setGeometry(QtCore.QRect(140, 15, 200, 110))
+        self.maximumFilterGB.setObjectName("maximumFilterGB")
+        self.maximumFilterGB.setVisible(False)
+
+        self.mximumKernelSizeLabel = QtWidgets.QLabel(
+            "Kernel size: ", self.maximumFilterGB)
+        self.mximumKernelSizeLabel.move(10, 25)
+
+        self.maximumKernelSize = QtWidgets.QLineEdit("5",
+            self.maximumFilterGB)
+        self.maximumKernelSize.setGeometry(QtCore.QRect(80, 22, 80, 20))
+
         self.filterButton = QtWidgets.QPushButton(
             "Filter", self.filterGroupBox)
-        self.filterButton.setGeometry(QtCore.QRect(10, 100, 100, 25))
+        self.filterButton.setGeometry(QtCore.QRect(10, 100, 120, 25))
         self.filterButton.setObjectName("filterButton")
         self.filterButton.clicked.connect(self.denoise)
 
@@ -410,20 +410,20 @@ class AppWidget(QtWidgets.QMainWindow):
             "Manual Threshold", self.segmentationGroupBox)
         self.thresholdManGB.setGeometry(QtCore.QRect(145, 15, 300, 110))
         self.thresholdManGB.setObjectName("thresholdManGB")
+        self.thresholdManGB.setVisible(False)
 
         self.thresholdManSlider = QtWidgets.QSlider(self.thresholdManGB)
         self.thresholdManSlider.setOrientation(QtCore.Qt.Horizontal)
         self.thresholdManSlider.setObjectName("thresholdManSlider")
-        self.thresholdManSlider.setGeometry(QtCore.QRect(10, 50, 250, 20))
+        self.thresholdManSlider.setGeometry(QtCore.QRect(10, 50, 245, 20))
         self.thresholdManSlider.sliderReleased.connect(self.segmentation)
-        # self.thresholdManSlider.setMaximum(4096)
 
         self.thresholdManValue = QtWidgets.QLineEdit(self.thresholdManGB)
-        self.thresholdManValue.setGeometry(QtCore.QRect(265, 50, 30, 20))
+        self.thresholdManValue.setGeometry(QtCore.QRect(260, 50, 35, 20))
         self.thresholdManValue.setEnabled(False)
 
         self.otsuThreshGB = QtWidgets.QGroupBox(
-            "Manual Threshold", self.segmentationGroupBox)
+            "Automatic Threshold", self.segmentationGroupBox)
         self.otsuThreshGB.setGeometry(QtCore.QRect(145, 15, 200, 110))
         self.otsuThreshGB.setObjectName("otsuThreshGB")
         self.otsuThreshGB.setVisible(False)
@@ -431,14 +431,13 @@ class AppWidget(QtWidgets.QMainWindow):
         self.autoThresh = QtWidgets.QComboBox(
             self.otsuThreshGB)
         self.autoThresh.setGeometry(
-            QtCore.QRect(80, 22, 80, 20))
+            QtCore.QRect(20, 20, 80, 20))
         self.autoThresh.addItem("Otsu")
-        self.autoThresh.addItem("Yen")
         self.autoThresh.addItem("Iso")
         self.autoThresh.addItem("Triangle")
 
         self.swSegmentationGB = QtWidgets.QGroupBox(
-            "Sobel+Watershed", self.segmentationGroupBox)
+            "Edge Operators", self.segmentationGroupBox)
         self.swSegmentationGB.setGeometry(QtCore.QRect(145, 15, 200, 115))
         self.swSegmentationGB.setObjectName("swSegmentationGB")
         self.swSegmentationGB.setVisible(False)
@@ -452,7 +451,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.edgesList.addItem("Prewitt")
         self.edgesList.addItem("Roberts")
 
-        self.edgesButton = QtWidgets.QPushButton(self.swSegmentationGB)
+        self.edgesButton = QtWidgets.QPushButton("Create edges",self.swSegmentationGB)
         self.edgesButton.setGeometry(
             QtCore.QRect(20, 50, 80, 20))
         self.edgesButton.clicked.connect(self.edges)
@@ -517,60 +516,6 @@ class AppWidget(QtWidgets.QMainWindow):
         self.cannyThreshLayout.addWidget(self.highThresholdSlider)
         self.highThresholdSlider.sliderReleased.connect(self.canny)
 
-        self.laplaceGB = QtWidgets.QGroupBox(
-            "Manual Threshold", self.segmentationGroupBox)
-        self.laplaceGB.setGeometry(QtCore.QRect(145, 15, 200, 110))
-        self.laplaceGB.setObjectName("laplaceGB")
-        self.laplaceGB.setVisible(False)
-
-        self.laplaceButton = QtWidgets.QPushButton(
-            "Otsu Threshold", self.laplaceGB)
-        self.laplaceButton.setGeometry(QtCore.QRect(10, 20, 100, 70))
-
-        self.kmeansGB = QtWidgets.QGroupBox(
-            "K-Means", self.segmentationGroupBox)
-        self.kmeansGB.setGeometry(QtCore.QRect(145, 15, 200, 110))
-        self.kmeansGB.setObjectName("kmeansGB")
-        self.kmeansGB.setVisible(False)
-
-        self.segmentsLabel = QtWidgets.QLabel(
-            "Number of Segments: ", self.kmeansGB)
-        self.segmentsLabel.move(10, 20)
-
-        self.segmentsValue = QtWidgets.QLineEdit(
-            "1", self.kmeansGB)
-        self.segmentsValue.setGeometry(QtCore.QRect(120, 20, 30, 15))
-
-        self.sigmaKMeansLabel = QtWidgets.QLabel(
-            "Sigma Value: ", self.kmeansGB)
-        self.sigmaKMeansLabel.move(10, 40)
-
-        self.sigmaKmeansValue = QtWidgets.QLineEdit(
-            "2", self.kmeansGB)
-        self.sigmaKmeansValue.setGeometry(QtCore.QRect(120, 40, 30, 15))
-
-        self.iterKMeansLabel = QtWidgets.QLabel(
-            "Iterations: ", self.kmeansGB)
-        self.iterKMeansLabel.move(10, 60)
-
-        self.iterKMeansValue = QtWidgets.QLineEdit(
-            "3", self.kmeansGB)
-        self.iterKMeansValue.setGeometry(QtCore.QRect(120, 60, 30, 15))
-
-        self.compactKMeansLabel = QtWidgets.QLabel(
-            "Compactness: ", self.kmeansGB)
-        self.compactKMeansLabel.move(10, 80)
-
-        self.compactKMeansValue = QtWidgets.QLineEdit(
-            "3", self.kmeansGB)
-        self.compactKMeansValue.setGeometry(QtCore.QRect(120, 80, 30, 15))
-
-        # self.kmeansSlider = QtWidgets.QSlider(self.kmeansGB)
-        # self.kmeansSlider.setOrientation(QtCore.Qt.Horizontal)
-        # self.kmeansSlider.setObjectName("kmeansSlider")
-        # self.kmeansSlider.setGeometry(QtCore.QRect(10, 80, 150, 15))
-        #self.highThresholdSlider.sliderReleased.connect(self.canny)
-
         self.trackingGroupBox = QtWidgets.QGroupBox("Tracking", self)
         self.trackingGroupBox.setGeometry(
             QtCore.QRect(245, 440, 470, 55))
@@ -596,7 +541,10 @@ class AppWidget(QtWidgets.QMainWindow):
         self.trackingHorizontLayout.addWidget(self.labelsButton)
         self.labelsButton.clicked.connect(self.labelling)
 
-        self.neighborhoodWindow = QtWidgets.QLineEdit("10",self.trackingHorizontWidget)
+        self.neighborhoodWindowLabel = QtWidgets.QLabel("Enlarge window by:", self.trackingGroupBox)
+        self.neighborhoodWindowLabel.move(60, 10)
+
+        self.neighborhoodWindow = QtWidgets.QLineEdit("5",self.trackingHorizontWidget)
         self.trackingHorizontLayout.addWidget(self.neighborhoodWindow)
 
         self.neighborhoodX = QtWidgets.QLabel("x", self.trackingHorizontWidget)
@@ -617,6 +565,12 @@ class AppWidget(QtWidgets.QMainWindow):
         self.stopTrackingButton.clicked.connect(self.stopTracking)
         self.stopTrackingButton.setEnabled(False)
 
+        self.parametersWindowLabel = QtWidgets.QLabel("Min size objects:", self.trackingGroupBox)
+        self.parametersWindowLabel.move(268, 10)
+
+        self.parametersWindow = QtWidgets.QLineEdit("100",self.trackingHorizontWidget)
+        self.trackingHorizontLayout.addWidget(self.parametersWindow)
+
         self.menuBar = self.menuBar()
         self.fileMenu = self.menuBar.addMenu('File')
         self.histogramMenu = self.menuBar.addMenu('Histogram')
@@ -626,20 +580,21 @@ class AppWidget(QtWidgets.QMainWindow):
 
         self.saveMenuButton = QtWidgets.QAction('Save image as', self)
         self.saveMenuButton.triggered.connect(self.saveImage)
+        self.saveMenuButton.setEnabled(False)
 
         self.closeMenuButton = QtWidgets.QAction('Close', self)
         self.closeMenuButton.triggered.connect(self.closeApp)
 
         self.histogramMenuButton = QtWidgets.QAction('Histogram', self)
         self.histogramMenuButton.triggered.connect(self.histogram)
+        self.histogramMenuButton.setEnabled(False)
+
 
         self.histogramMenu.addAction(self.histogramMenuButton)
         self.fileMenu.addAction(self.openMenuButton)
-        self.fileMenu.addAction(self.closeMenuButton)
         self.fileMenu.addAction(self.saveMenuButton)
+        self.fileMenu.addAction(self.closeMenuButton)
 
-        self.histogramMenuButton = QtWidgets.QAction('Histogram', self)
-        self.histogramMenuButton.triggered.connect(self.histogram)
 
         self.errorWarning = QtWidgets.QMessageBox()
         self.errorWarning.setWindowTitle("Invalid Value")
@@ -674,6 +629,9 @@ class AppWidget(QtWidgets.QMainWindow):
             self.currentImage = self.images[self.index].loadImage()
             self.positionLabel.setText(self.images[self.index].name)
             self.showImg(self.currentImage)
+            self.saveMenuButton.setEnabled(True)
+            self.histogramMenuButton.setEnabled(True)
+            self.objectPropertiesTable.clearContents()
 
         # in case we would already do some changes to image and open
         # new file of images, we want to disable some of the funcionality
@@ -707,19 +665,30 @@ class AppWidget(QtWidgets.QMainWindow):
     #create and show histogram of current image on screen
     def histogram(self):
         hist, centers = skimage.exposure.histogram(self.currentImage, nbins = 4096)
+        img, bins = skimage.exposure.cumulative_distribution(self.currentImage, nbins = 4096)
+        fig, ax = plt.subplots(1,1, figsize = (8,4))
 
-        fig, ax = plt.subplots(1,1, figsize = (8,3))
         ax.plot(centers, hist)
+        ax.set_xlabel('jas')
+        ax.set_ylabel('četnost')
+
+        ax2 = ax.twinx()
+        ax2.plot (bins, img, 'r')
+        ax2.set_ylabel('Relativní četnost')
+
         plt.show()
 
     #method for manipulation of image contrast - only original data can be manipulated
-    def contrast(self):
+    def contrast(self, index = None):
         # taking values from user interface
         valueBlack = self.blackSlider.value()
         valueWhite = self.whiteSlider.value()
+        if index != None:
+            ind = index
+        else:
+            ind = self.index
 
-        img = self.images[self.index]
-
+        img = self.images[ind]
         self.currentState = "Contrast"
 
         # changing the contrast of the image and showing the result
@@ -731,16 +700,26 @@ class AppWidget(QtWidgets.QMainWindow):
     # it will apply all the methods there have been applied so far
     def pathPosition(self):
         index = self.pathsList.currentRow()
+        print(index)
 
         if self.currentState == "Contrast":
             self.images[index].loadImage()
-            self.contrast()
+            self.contrast(index)
 
         elif self.currentState == "Median Background":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
                             ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
             self.images[index].loadImage()
             self.showImg(self.images[index].medianBackground(neighborhood))
+            self.dilationButton.setEnabled(False)
+            self.meanBackgroundButton.setEnabled(False)
+            self.filterGroupBox.setEnabled(False)
+            self.segmentButton.setEnabled(False)
+            self.segmentationGroupBox.setEnabled(False)
+            self.objectPropertiesTable.setEnabled(False)
+            self.startTrackingButton.setEnabled(False)
+            self.trackingGroupBox.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
 
         elif self.currentState == "Threshold Background":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
@@ -749,6 +728,15 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].medianBackground(neighborhood)
             self.showImg(self.images[index].threshold(self.threshold))
 
+            self.meanBackgroundButton.setEnabled(False)
+            self.filterGroupBox.setEnabled(False)
+            self.segmentButton.setEnabled(False)
+            self.segmentationGroupBox.setEnabled(False)
+            self.objectPropertiesTable.setEnabled(False)
+            self.startTrackingButton.setEnabled(False)
+            self.trackingGroupBox.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
+
         elif self.currentState == "Dilation":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
                             ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
@@ -756,6 +744,14 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].medianBackground(neighborhood)
             self.images[index].threshold(self.threshold)
             self.showImg(self.images[index].dilation())
+
+            self.filterGroupBox.setEnabled(False)
+            self.segmentButton.setEnabled(False)
+            self.segmentationGroupBox.setEnabled(False)
+            self.objectPropertiesTable.setEnabled(False)
+            self.startTrackingButton.setEnabled(False)
+            self.trackingGroupBox.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
 
         elif self.currentState == "Mean Background":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
@@ -767,6 +763,13 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].meanBackground(neighborhood)
             self.showImg(self.images[index].imageDivision())
 
+            self.segmentButton.setEnabled(False)
+            self.segmentationGroupBox.setEnabled(False)
+            self.objectPropertiesTable.setEnabled(False)
+            self.startTrackingButton.setEnabled(False)
+            self.trackingGroupBox.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
+
         elif self.currentState == "Filtered":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
                             ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
@@ -777,26 +780,30 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].meanBackground(neighborhood)
             self.images[index].imageDivision()
 
+            self.objectPropertiesTable.setEnabled(False)
+            self.startTrackingButton.setEnabled(False)
+            self.trackingGroupBox.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
+
             self.currentFiltImg = np.zeros_like(self.images[index].data)
 
             if self.filter == "Median Filter":
                 self.currentFiltImg = medianFilter.process(self.images[index].divisionImg, self.kernel)
-                #self.currentFiltImg= np.where(self.images[index].mask == 1, self.currentFiltImg, 1)
-                self.showImg(self.currentFiltImg)
 
             elif self.filter == "Mean Filter":
                 self.currentFiltImg = meanFilter.process(self.images[index].divisionImg, self.kernel)
-                self.showImg(self.currentFiltImg)
 
             elif self.filter == "Gauss Filter":
                 self.currentFiltImg = gaussFilter.process(self.images[index].divisionImg, self.sigma)
-                self.showImg(self.currentFiltImg)
 
             elif self.filter == "Bilateral Filter":
                 self.currentFiltImg = bilateralFilter.process(
                     self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
-                self.showImg(self.currentFiltImg)
 
+            elif self.filter == "Maximum Filter":
+                self.currentFiltImg = maxFilter.process(self.images[index].divisionImg, self.kernel)
+
+            self.showImg(self.currentFiltImg)
         elif self.currentState == "Canny":
             neighborhood = self.images[index - (self.neighborhoodSize + 3):index - 3
                             ] + self.images[index + 4:index + (self.neighborhoodSize + 4)]
@@ -807,6 +814,10 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].meanBackground(neighborhood)
             self.images[index].imageDivision()
 
+
+            self.startTrackingButton.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
+
             self.currentFiltImg = np.zeros_like(self.images[index].data)
 
             if self.filter == "Median Filter":
@@ -822,6 +833,9 @@ class AppWidget(QtWidgets.QMainWindow):
             elif self.filter == "Bilateral Filter":
                 self.currentFiltImg = bilateralFilter.process(
                     self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
+
+            elif self.filter == "Maximum Filter":
+                self.currentFiltImg = maxFilter.process(self.images[index].divisionImg, self.kernel)
 
             self.showImg(self.images[index].cannyEdgeDetector(
             self.currentFiltImg, self.sigmaCanny, self.lowThresh, self.highThresh))
@@ -836,6 +850,9 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].meanBackground(neighborhood)
             self.images[index].imageDivision()
 
+            self.startTrackingButton.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
+
             self.currentFiltImg = np.zeros_like(self.images[index].data)
 
             if self.filter == "Median Filter":
@@ -851,6 +868,8 @@ class AppWidget(QtWidgets.QMainWindow):
             elif self.filter == "Bilateral Filter":
                 self.currentFiltImg = bilateralFilter.process(
                     self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
+            elif self.filter == "Maximum Filter":
+                self.currentFiltImg = maxFilter.process(self.images[index].divisionImg, self.kernel)
 
             self.showImg(self.images[index].edges(self.currentFiltImg))
 
@@ -864,6 +883,9 @@ class AppWidget(QtWidgets.QMainWindow):
             self.images[index].meanBackground(neighborhood)
             self.images[index].imageDivision()
 
+            self.startTrackingButton.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(False)
+
             self.currentFiltImg = np.zeros_like(self.images[index].data)
 
             if self.filter == "Median Filter":
@@ -879,6 +901,9 @@ class AppWidget(QtWidgets.QMainWindow):
             elif self.filter == "Bilateral Filter":
                 self.currentFiltImg = bilateralFilter.process(
                     self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
+
+            elif self.filter == "Maximum Filter":
+                self.currentFiltImg = maxFilter.process(self.images[index].divisionImg, self.kernel)
 
 
             if self.segmentationTech == "Manual Threshold":
@@ -924,6 +949,9 @@ class AppWidget(QtWidgets.QMainWindow):
                 self.currentFiltImg = bilateralFilter.process(
                     self.images[index].divisionImg, self.sigmaColor, self.sigmaSpatial)
 
+            elif self.filter == "Maximum Filter":
+                self.currentFiltImg = maxFilter.process(self.images[index].divisionImg, self.kernel)
+
 
             if self.segmentationTech == "Manual Threshold":
                 self.images[index].thresholdSegment(self.currentFiltImg, self.manThreshold)
@@ -942,14 +970,14 @@ class AppWidget(QtWidgets.QMainWindow):
                                       self.lowThresh, self.highThresh)
                 self.images[index].fillingHoles()
 
-            self.objectProperties, _ , image = self.images[index].labelling()
-            self.showImg(image)
+            self.labelling(index)
+            # self.showImg(image)
 
-            self.objectPropertiesTable.clearContents()
-            self.objectPropertiesTable.setRowCount(1)
+            # self.objectPropertiesTable.clearContents()
+            # self.objectPropertiesTable.setRowCount(1)
 
-            self.tableUpdate(self.objectProperties)
-            Tracking.zeroCross = []
+            # self.tableUpdate(self.objectProperties)
+            # Tracking.zeroCross = []
 
         self.index = self.pathsList.currentRow()
         self.positionLabel.setText(self.images[self.index].name)
@@ -1093,6 +1121,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.medianFilterGroupBox.setVisible(False)
         self.gaussFilterGroupBox.setVisible(False)
         self.meanFilterGroupBox.setVisible(False)
+        self.maximumFilterGB.setVisible(False)
 
         # enabeling box with selected filtration method
         if self.filter == "Median Filter":
@@ -1107,6 +1136,8 @@ class AppWidget(QtWidgets.QMainWindow):
         elif self.filter == "Bilateral Filter":
             self.bilateralFilterGroupBox.setVisible(True)
 
+        elif self.filter == "Maximum Filter":
+            self.maximumFilterGB.setVisible(True)
     # applying specific image filtration method
     def denoise(self):
         image = self.images[self.index]
@@ -1142,21 +1173,18 @@ class AppWidget(QtWidgets.QMainWindow):
             self.currentFiltImg = medianFilter.process(image.divisionImg, self.kernel)
             self.currentImage = self.currentFiltImg
 
-            self.showImg(self.currentFiltImg)
-
         elif self.filter == "Mean Filter":
 
             geometry = str(self.meanFilterKernelGeometry.currentText())
-            size = int(self.meanFilterKernelSize.text())
+            self.sizeKernel = int(self.meanFilterKernelSize.text())
 
             if geometry == "Square":
                 self.kernel = skimage.morphology.square(size)
             else:
                 self.kernel = skimage.morphology.disk(size)
 
-            self.currentFiltImg = meanFilter.process(image.divisionImg, self.kernel)
+            self.currentFiltImg = meanFilter.process(image.divisionImg, self.sizeKernel)
             self.currentImage = self.currentFiltImg
-            self.showImg(self.currentFiltImg)
 
         elif self.filter == "Gauss Filter":
             # checking if the parameters are suitable
@@ -1177,7 +1205,6 @@ class AppWidget(QtWidgets.QMainWindow):
             # applying gauss filter on image using "filter" module and specific static method
             self.currentFiltImg = gaussFilter.process(image.divisionImg, self.sigma)
             self.currentImage = self.currentFiltImg
-            self.showImg(self.currentFiltImg)
 
         elif self.filter == "Bilateral Filter":
             # checking if the parameters are suitable
@@ -1210,7 +1237,31 @@ class AppWidget(QtWidgets.QMainWindow):
             # applying gauss filter on image using "filter" module and specific static method
             self.currentFiltImg = bilateralFilter.process(image.divisionImg, self.sigmaColor, self.sigmaSpatial)
             self.currentImage = self.currentFiltImg
-            self.showImg(self.currentFiltImg)
+
+
+        elif self.filter == "Maximum Filter":
+            try:
+                value = int(self.maximumKernelSize.text())
+                if value < 0:
+                    self.errorWarning.setText("The size of kernel has to have positive and odd integer value!!")
+                    self.errorWarning.setWindowTitle("Invalid Value")
+                    return self.popup()
+            except ValueError:
+                self.errorWarning.setText("You have to enter positive and odd integer value!")
+                self.errorWarning.setWindowTitle("Invalid Value")
+                return self.popup()
+
+            # taking the parameters from UI
+
+            self.sizeKernel = int(self.maximumKernelSize.text())
+
+            if geometry == "Square":
+                self.kernel = skimage.morphology.square(size)
+            else:
+                self.kernel = skimage.morphology.disk(size)
+            self.currentFiltImg = maxFilter.process(image.divisionImg, self.sizeKernel)
+
+        self.showImg(self.currentFiltImg)
 
     # checking the position in segmetation method list
     def segmentationPosition(self):
@@ -1221,8 +1272,6 @@ class AppWidget(QtWidgets.QMainWindow):
         self.otsuThreshGB.setVisible(False)
         self.swSegmentationGB.setVisible(False)
         self.cannyEdgeDetecetorGB.setVisible(False)
-        self.laplaceGB.setVisible(False)
-        self.kmeansGB.setVisible(False)
 
         # enabeling specific box depending on selected segmentation method
         if self.segmentationTech == "Manual Threshold":
@@ -1284,9 +1333,9 @@ class AppWidget(QtWidgets.QMainWindow):
 
         elif self.segmentationTech == "Automatic Thresh":
             # take selected auto threshold method
-            method = self.autoThresh.currentText()
+            self.autoMethod = self.autoThresh.currentText()
             # apply this method to the filtered image and display the result
-            self.currentImage = image.autoThresh(method, self.currentFiltImg)
+            self.currentImage = image.autoThresh(self.autoMethod, self.currentFiltImg)
             self.showImg(self.currentImage)
 
         elif self.segmentationTech == "Edge Operators":
@@ -1304,10 +1353,10 @@ class AppWidget(QtWidgets.QMainWindow):
         self.segmentButton.setEnabled(True)
 
         # taking the selected method for finding edges
-        method = self.edgesList.currentText()
+        self.autoMethod = self.edgesList.currentText()
 
         # applying this method on filtered image and create an edge map
-        self.currentImage = image.edges(method, self.currentFiltImg)
+        self.currentImage = image.edges(self.autoMethod, self.currentFiltImg)
         self.showImg(self.currentImage)
         self.currentState = 'Edges'
 
@@ -1341,8 +1390,14 @@ class AppWidget(QtWidgets.QMainWindow):
         self.showImg(self.currentImage)
 
 
-    def labelling(self):
-        image = self.images[self.index]
+    def labelling(self, index = None):
+        if index != False:
+            ind = index
+        else:
+            ind = self.index
+
+
+        image = self.images[ind]
         self.currentState = "Labeled"
 
         # create list for parameters
@@ -1353,6 +1408,7 @@ class AppWidget(QtWidgets.QMainWindow):
         self.pozY = [[] for x in range(100)]
         self.orientation = [[] for x in range(100)]
         self.changedLabels = {}
+        self.ellongation = [[] for x in range(100)]
 
         # enable properties table and tracking button
         self.objectPropertiesTable.setEnabled(True)
@@ -1365,16 +1421,31 @@ class AppWidget(QtWidgets.QMainWindow):
         self.startTrackingButton.setEnabled(True)
 
         # get properties of objects in image and color image
-        self.objectProperties, _ , self.currentImage = image.labelling()
+        try:
+            value = int(self.parametersWindow.text())
+            if value < 20 :
+                self.errorWarning.setText("The size has to have integer value larger than 19!!")
+                self.errorWarning.setWindowTitle("Invalid Value")
+                return self.popup()
+        except ValueError:
+            self.errorWarning.setText("You have to enter integer value larger than 19!")
+            self.errorWarning.setWindowTitle("Invalid Value")
+            return self.popup()
+        self.size = int(self.parametersWindow.text())
+        self.objectProperties, _ , self.currentImage = image.labelling(self.size)
 
         self.objectPropertiesTable.clearContents()
         self.objectPropertiesTable.setRowCount(1)
+
+        Tracking.zeroCross = []
+        Tracking.sameLabelAlive = None
+        Tracking.propertiesNew = None
 
         # update table of properties and display image
         self.tableUpdate(self.objectProperties)
         self.showImg(self.currentImage)
 
-    def tableUpdate(self, objectProperties, orientation = None):
+    def tableUpdate(self, objectProperties, orientation = None, ellongation = None):
         # counting all the rows
         rowCount = self.objectPropertiesTable.rowCount()
         if rowCount == 1 and self.objectPropertiesTable.item(0,0) == None:
@@ -1403,6 +1474,13 @@ class AppWidget(QtWidgets.QMainWindow):
                             self.orientation[label].append(orientation[i])
                         else:
                             self.orientation[label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                        if ellongation:
+                            self.ellongation[label].append(ellongation[i])
+                        else:
+                            majorA = fiber.major_axis_length
+                            minorA = fiber.minor_axis_length
+                            self.ellongation[label].append(math.log2(majorA/minorA))
+
                     else:
                         label = max(self.uniqueLabel) + 1
                         self.uniqueLabel.append(label)
@@ -1415,6 +1493,12 @@ class AppWidget(QtWidgets.QMainWindow):
                             self.orientation[label].append(orientation[i])
                         else:
                             self.orientation[label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                        if ellongation:
+                            self.ellongation[label].append(ellongation[i])
+                        else:
+                            majorA = fiber.major_axis_length
+                            minorA = fiber.minor_axis_length
+                            self.ellongation[label].append(math.log2(majorA/minorA))
 
                 else:
                     if fiber.label in self.uniqueLabel:
@@ -1427,6 +1511,12 @@ class AppWidget(QtWidgets.QMainWindow):
                             self.orientation[fiber.label].append(orientation[i])
                         else:
                             self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                        if ellongation:
+                            self.ellongation[fiber.label].append(ellongation[i])
+                        else:
+                            majorA = fiber.major_axis_length
+                            minorA = fiber.minor_axis_length
+                            self.ellongation[fiber.label].append(math.log2(majorA/minorA))
                     else:
                         # add new label to the list of labels in table
                         self.uniqueLabel.append(fiber.label)
@@ -1437,6 +1527,12 @@ class AppWidget(QtWidgets.QMainWindow):
                             self.orientation[fiber.label].append(orientation[i])
                         else:
                             self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                        if ellongation:
+                            self.ellongation[fiber.label].append(ellongation[i])
+                        else:
+                            majorA = fiber.major_axis_length
+                            minorA = fiber.minor_axis_length
+                            self.ellongation[fiber.label].append(math.log2(majorA/minorA))
             else:
                     if fiber.label in self.uniqueLabel:
                         # count number of records for specific label
@@ -1448,6 +1544,12 @@ class AppWidget(QtWidgets.QMainWindow):
                             self.orientation[fiber.label].append(orientation[i])
                         else:
                             self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                        if ellongation:
+                            self.ellongation[fiber.label].append(ellongation[i])
+                        else:
+                            majorA = fiber.major_axis_length
+                            minorA = fiber.minor_axis_length
+                            self.ellongation[fiber.label].append(math.log2(majorA/minorA))
                     else:
                         # add new label to the list of labels in table
                         self.uniqueLabel.append(fiber.label)
@@ -1458,6 +1560,12 @@ class AppWidget(QtWidgets.QMainWindow):
                             self.orientation[fiber.label].append(orientation[i])
                         else:
                             self.orientation[fiber.label].append(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                        if ellongation:
+                            self.ellongation[fiber.label].append(ellongation[i])
+                        else:
+                            majorA = fiber.major_axis_length
+                            minorA = fiber.minor_axis_length
+                            self.ellongation[fiber.label].append(math.log2(majorA/minorA))
 
             # rouding the centroid position and creating string
             centroidx = str(np.round(centroidx,decimals = 2))
@@ -1466,15 +1574,19 @@ class AppWidget(QtWidgets.QMainWindow):
             if orientation:
                 # create data to put into table
                 if fiber.label in self.changedLabels:
-                    datas = [str(self.changedLabels[fiber.label]),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i])]
+                    datas = [str(self.changedLabels[fiber.label]),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i]), str(ellongation[i])]
                 else:
-                    datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i])]
+                    datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),str(orientation[i]),str(ellongation[i])]
             else:
                 orient = str(np.round(math.pi/2 + fiber.orientation,decimals = 2))
+                majorA = fiber.major_axis_length
+                minorA = fiber.minor_axis_length
+                ellong = np.round(math.log2(majorA / minorA), decimals = 2)
+
                 if fiber.label in self.changedLabels:
-                    datas = [str(self.changedLabels[fiber.label]),str(color),centroidy,centroidx,str(fiber.area),orient]
+                    datas = [str(self.changedLabels[fiber.label]),str(color),centroidy,centroidx,str(fiber.area),orient,str(ellong)]
                 else:
-                    datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),orient]
+                    datas = [str(fiber.label),str(color),centroidy,centroidx,str(fiber.area),orient, str(ellong)]
 
             # add the data into the table
             for j, data in enumerate(datas):
@@ -1489,17 +1601,11 @@ class AppWidget(QtWidgets.QMainWindow):
         img = self.images[self.index]
         self.positionLabel.setText(img.name)
 
-    def editTable(self):
-        # editing specific cell in the table
-        self.objectPropertiesTable.setEditTriggers(QtWidgets.QTableWidget.CurrentChanged)
-        self.objectPropertiesTable.editItem(self.objectPropertiesTable.item(self.objectPropertiesTable.currentRow(),self.objectPropertiesTable.currentColumn()))
-        self.objectPropertiesTable.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
-
     def startTracking(self):
         # creates an instance on another thread, modul "tracking", where we are tracking the movement of objects
         self.running_thread = Tracking(self.images, self.index, self.objectProperties, self.neighborhoodSize, self.filter, self.threshold, self.kernel
             , self.sigma, self.sigmaColor, self.sigmaSpatial, self.segmentationTech, self.manThreshold, self.sigmaCanny
-            , int(self.neighborhoodWindow.text()), int(self.neighborhoodWindow2.text()), self.lowThresh, self.highThresh)
+            , int(self.neighborhoodWindow.text()), int(self.neighborhoodWindow2.text()), self.lowThresh, self.highThresh, self.size, self.sizeKernel, self.autoMethod)
 
         # checkigng if the values from UI are suitable
         try:
@@ -1554,6 +1660,10 @@ class AppWidget(QtWidgets.QMainWindow):
     def sortTable(self):
         # sorts the items in the table
         self.objectPropertiesTable.sortItems(0)
+        self.filterTableButton.setEnabled(True)
+        self.plotTableButton.setEnabled(True)
+        self.plotOrientationButton.setEnabled(True)
+        self.deleteTableButton.setEnabled(True)
 
     def deleteRow(self, label = None):
         # deletes selected row/s from the table
@@ -1583,10 +1693,12 @@ class AppWidget(QtWidgets.QMainWindow):
     def exportTable(self):
         # eport the table into .xlsx format and saves it into specific diretorz
         filename, _ = QFileDialog.getSaveFileName(self, 'Save Table', "C:/Users/Michal/Documents/Škola/Diplomka/src", '*.xlsx')
+        if not filename:
+            return True
         wbk = Workbook()
         ws = wbk.active
         for col in range(self.objectPropertiesTable.columnCount()):
-            for row in range(self.objectPropertiesTable.rowCount()-1):
+            for row in range(self.objectPropertiesTable.rowCount()):
                     teext = str(self.objectPropertiesTable.item(row, col).text())
                     ws.cell(row = row+1 , column=col+1).value=teext
         wbk.save(filename)
@@ -1632,9 +1744,9 @@ class AppWidget(QtWidgets.QMainWindow):
                     predictionX += x1 - x0
                     predictionNormX = np.divide(predictionX, count-1)
 
-                    if abs(x1+predictionNormX-x2)<(predictionNormX*0.2):
+                    if abs(x1+predictionNormX-x2)<(predictionNormX*0.2) and self.objectPropertiesTable.item(count + currentRow,2) != None:
                         self.objectPropertiesTable.item(count + currentRow,2).setBackground(QColor('yellow'))
-                    else:
+                    elif self.objectPropertiesTable.item(count + currentRow,2) != None:
                         if label not in deleteList: deleteList.append(label)
                         self.objectPropertiesTable.item(count + currentRow,2).setBackground(QColor('red'))
                     x0 = x1
@@ -1643,9 +1755,9 @@ class AppWidget(QtWidgets.QMainWindow):
                     predictionY += y1 - y0
                     predictionNormY = np.divide(predictionY, count-1)
 
-                    if abs(y1+predictionNormY-y2)<(predictionNormY*0.5):
+                    if abs(y1+predictionNormY-y2)<(predictionNormY*0.5) and self.objectPropertiesTable.item(count + currentRow,2) != None:
                         self.objectPropertiesTable.item(count + currentRow,3).setBackground(QColor('yellow'))
-                    else:
+                    elif self.objectPropertiesTable.item(count + currentRow,2) != None:
                         if label not in deleteList: deleteList.append(label)
                         self.objectPropertiesTable.item(count + currentRow,3).setBackground(QColor('red'))
                     y0 = y1
@@ -1669,7 +1781,6 @@ class AppWidget(QtWidgets.QMainWindow):
         # posibility to delete data of labels where the values were not in the tolerance
         for label in deleteList:
                 self.errorWarning.setText(f"Mismatching values were found in records of fiber with label {label}.")
-                self.errorWarning.setInformativeText("Do you want to delete records of this label?")
                 self.errorWarning.setWindowTitle("Warning")
                 self.errorWarning.setStandardButtons(QtWidgets.QMessageBox.Yes|QtWidgets.QMessageBox.No)
                 self.errorWarning.setDefaultButton(QtWidgets.QMessageBox.Yes)
@@ -1679,20 +1790,25 @@ class AppWidget(QtWidgets.QMainWindow):
                 if result == QtWidgets.QMessageBox.Yes:
                     deleteLabel.append(label)
                     self.deleteRow(label = label)
-
+        self.errorWarning.setInformativeText(None)
         # update the label list in the table
         for x in deleteLabel:
             self.uniqueLabel.remove(x)
 
     def plotResutlts(self):
         # perform cubic spline interpolation of the data
+        problemLabel = []
         for label in self.uniqueLabel:
-            fig, ax = plt.subplots()
+            if self.labelCount[label] <= 3:
+                problemLabel.append(label)
+                continue
+            fig, ax = plt.subplots(1,1, figsize = (8,6))
             axes= plt.gca()
             # changing the axis range and position
             axes.set_xlim([0,1024])
             maxTick = None
             minTick = None
+
             if min(self.pozY[label]) -50 < 0:
                 maxTick = 0
             else:
@@ -1704,7 +1820,11 @@ class AppWidget(QtWidgets.QMainWindow):
 
             axes.set_ylim([minTick,maxTick])
             axes.xaxis.tick_top()
+            axes.xaxis.set_label_position('top')
             axes.yaxis.tick_left()
+            plt.xlabel('x')
+            plt.ylabel('y')
+            plt.title('Průběh trajektorie vlákna')
             points = np.array([self.pozX[label],self.pozY[label]]).T
             distance = np.cumsum( np.sqrt(np.sum( np.diff(points, axis=0)**2, axis=1 )) )
             distance = np.insert(distance, 0, 0)/distance[-1]
@@ -1712,25 +1832,72 @@ class AppWidget(QtWidgets.QMainWindow):
 
             splineX = interp1d(distance, points, kind = 'cubic', axis = 0)
             interpolated_points = splineX(alpha)
-            plt.plot(*points.T,'x', *interpolated_points.T, '-', label=label);
+
+            #fitting a curve into the points
+            z = np.polyfit(self.pozX[label],self.pozY[label],3)
+            fit = np.poly1d(z)
+            x_new = np.linspace(self.pozX[label][0], self.pozX[label][-1], 200)
+            y_new = fit(x_new)
+
+            plt.plot(*points.T,'x', label="Body těžiště")
+            plt.plot(*interpolated_points.T,'-', label="Interpolační křivka")
+            plt.plot(x_new, y_new, '--', label = "Aproximační křivka")
+            plt.legend(loc='best')
+
+        for label in problemLabel:
+            self.errorWarning.setText(f"There is not enought records to plot label {label}'s trajectory.")
+            self.errorWarning.setWindowTitle("Warning")
+
+            result = self.popup(icon = 3)
 
         # show the plot
         plt.show()
 
     def plotOrientation(self):
+        problemLabel = []
         for i, label in enumerate(self.uniqueLabel):
-            fig, ax = plt.subplots()
+            if self.labelCount[label] <= 3:
+                problemLabel.append(label)
+                continue
+            fig, ax = plt.subplots(1,1, figsize = (8,6))
             unit = 0.5
             yTick = np.arange (0, 2+unit, unit)
             yLabel = [r"$0$", r"$\frac{\pi}{2}$", r"$\pi$", r"$\frac{3\pi}{2}$",  r"$2\pi}$"]
             axes = plt.gca()
             axes.set_ylim([0,2*math.pi])
             axes.set_yticks(yTick*np.pi)
+            plt.xlabel('x')
+            plt.ylabel('orientace')
+            plt.title('Průběh orientace a elongace vlákna')
             ax.set_yticklabels(yLabel)
-            splineX = interp1d(self.pozX[label], self.orientation[label], kind = 'cubic')
+            splineX = interp1d(self.pozX[label], self.orientation[label], kind = 'linear')
             newX = np.linspace(min(self.pozX[label]),max(self.pozX[label]), 200)
             interpolated_points = splineX(newX)
-            plt.plot(self.pozX[label], self.orientation[label], 'x', newX, interpolated_points,'-')
+            ax.plot(self.pozX[label], self.orientation[label], 'kx',label="Hodnoty orientace")
+            ax.plot(newX, interpolated_points,'-g', label="Interpolační křivka orientace")
+            #ax.legend(loc='best', fontsize = 'small')
+
+            ax2 = ax.twinx()
+            ax2.set_ylabel('elongace')
+            splineX2 = interp1d(self.pozX[label], self.ellongation[label], kind = 'linear')
+            interpolated_points2 = splineX2(newX)
+            ax2.set_ylim([0,5])
+            yTick = np.arange(0,6,1)
+            ax2.set_yticks(yTick)
+
+            ax2.plot(self.pozX[label], self.ellongation[label], 'bo', label = "Hodnoty elongace")
+            ax.plot(np.nan, 'bo', label = 'Hodnoty elongace')
+            ax2.plot(newX, interpolated_points2, '--r', label = "Interpolační křivka elongace")
+            ax.plot(np.nan, '--r', label = 'Interpolační křivka elongace')
+
+            ax.legend(loc='best', fontsize = 'small')
+
+        for label in problemLabel:
+            self.errorWarning.setText(f"There is not enought records to plot label {label}'s orientation and elongation.")
+            self.errorWarning.setWindowTitle("Warning")
+
+            result = self.popup(icon = 3)
+        fig.tight_layout()
 
         plt.show()
 
