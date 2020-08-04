@@ -1,7 +1,5 @@
 from image import Image
 from filter import medianFilter, meanFilter, gaussFilter, bilateralFilter, maxFilter
-from table import Table
-from background import Background
 from tracking import Tracking
 
 import sys
@@ -607,7 +605,7 @@ class AppWidget(QtWidgets.QMainWindow):
         # importing paths of images
         self.images = []
         imagePaths, _ = QFileDialog.getOpenFileNames(
-            self, 'Open Images', "C:/Users/Michal/Documents/Škola/Diplomka/src/data/Vlakna_DP/Vlakna_DP", '*.tif')
+            self, 'Open Images', "C:", '*.tif')
 
         # enabling some widgets of user interface
         self.contrastGroupBox.setEnabled(True)
@@ -665,6 +663,7 @@ class AppWidget(QtWidgets.QMainWindow):
     #create and show histogram of current image on screen
     def histogram(self):
         hist, centers = skimage.exposure.histogram(self.currentImage, nbins = 4096)
+        # cumulative hist
         img, bins = skimage.exposure.cumulative_distribution(self.currentImage, nbins = 4096)
         fig, ax = plt.subplots(1,1, figsize = (8,4))
 
@@ -681,27 +680,38 @@ class AppWidget(QtWidgets.QMainWindow):
     #method for manipulation of image contrast - only original data can be manipulated
     def contrast(self, index = None):
         # taking values from user interface
-        valueBlack = self.blackSlider.value()
-        valueWhite = self.whiteSlider.value()
+
         if index != None:
             ind = index
         else:
             ind = self.index
-
         img = self.images[ind]
-        self.currentState = "Contrast"
+        # if we have displayed filtered image we change the sliders
+        if self.currentState == "Mean Background":
+            self.blackSlider.setMaximum(1000000)
+            self.whiteSlider.setMaximum(1000000)
+            valueBlack = self.blackSlider.value() /1000000
+            valueWhite = self.whiteSlider.value() /1000000
+            image = img.contrast(valueBlack, valueWhite, self.currentImage)
+        else:
+            self.blackSlider.setMaximum(4096)
+            self.whiteSlider.setMaximum(4096)
+            valueBlack = self.blackSlider.value()
+            valueWhite = self.whiteSlider.value()
+            self.currentState = "Contrast"
 
-        # changing the contrast of the image and showing the result
-        self.currentImage = img.contrast(valueBlack, valueWhite)
+            # changing the contrast of the image and showing the result
 
-        self.showImg(self.currentImage)
+            image = img.contrast(valueBlack, valueWhite)
+
+        self.showImg(image)
 
     # method called when user want to change image using the list of opened images
     # it will apply all the methods there have been applied so far
     def pathPosition(self):
         index = self.pathsList.currentRow()
-        print(index)
 
+        # applying methods depending on the currently visible image
         if self.currentState == "Contrast":
             self.images[index].loadImage()
             self.contrast(index)
@@ -1156,7 +1166,18 @@ class AppWidget(QtWidgets.QMainWindow):
                     self.errorWarning.setWindowTitle("Invalid Value")
                     return self.popup()
             except ValueError:
-                self.errorWarning.setText("TYou have to enter positive and odd integer value!")
+                self.errorWarning.setText("You have to enter positive and odd integer value!")
+                self.errorWarning.setWindowTitle("Invalid Value")
+                return self.popup()
+
+            try:
+                value = int(self.medianFilterKernelSize.text())
+                if value%2 == 0:
+                    self.errorWarning.setText("The size of kernel has to have positive and odd integer value!!")
+                    self.errorWarning.setWindowTitle("Invalid Value")
+                    return self.popup()
+            except ValueError:
+                self.errorWarning.setText("You have to enter positive and odd integer value!")
                 self.errorWarning.setWindowTitle("Invalid Value")
                 return self.popup()
 
@@ -1175,13 +1196,30 @@ class AppWidget(QtWidgets.QMainWindow):
 
         elif self.filter == "Mean Filter":
 
-            geometry = str(self.meanFilterKernelGeometry.currentText())
-            self.sizeKernel = int(self.meanFilterKernelSize.text())
+            try:
+                value = int(self.meanFilterKernelSize.text())
+                if value < 0:
+                    self.errorWarning.setText("The size of kernel has to have positive and odd integer value!!")
+                    self.errorWarning.setWindowTitle("Invalid Value")
+                    return self.popup()
+            except ValueError:
+                self.errorWarning.setText("You have to enter positive and odd integer value!")
+                self.errorWarning.setWindowTitle("Invalid Value")
+                return self.popup()
 
-            if geometry == "Square":
-                self.kernel = skimage.morphology.square(size)
-            else:
-                self.kernel = skimage.morphology.disk(size)
+            try:
+                value = int(self.meanFilterKernelSize.text())
+                if value % 2 == 0:
+                    self.errorWarning.setText("The size of kernel has to have positive and odd integer value!!")
+                    self.errorWarning.setWindowTitle("Invalid Value")
+                    return self.popup()
+            except ValueError:
+                self.errorWarning.setText("You have to enter positive and odd integer value!")
+                self.errorWarning.setWindowTitle("Invalid Value")
+                return self.popup()
+
+
+            self.sizeKernel = int(self.meanFilterKernelSize.text())
 
             self.currentFiltImg = meanFilter.process(image.divisionImg, self.sizeKernel)
             self.currentImage = self.currentFiltImg
@@ -1251,14 +1289,21 @@ class AppWidget(QtWidgets.QMainWindow):
                 self.errorWarning.setWindowTitle("Invalid Value")
                 return self.popup()
 
+            try:
+                value = int(self.maximumKernelSize.text())
+                if value % 2 == 0:
+                    self.errorWarning.setText("The size of kernel has to have positive and odd integer value!!")
+                    self.errorWarning.setWindowTitle("Invalid Value")
+                    return self.popup()
+            except ValueError:
+                self.errorWarning.setText("You have to enter positive and odd integer value!")
+                self.errorWarning.setWindowTitle("Invalid Value")
+                return self.popup()
+
             # taking the parameters from UI
 
             self.sizeKernel = int(self.maximumKernelSize.text())
 
-            if geometry == "Square":
-                self.kernel = skimage.morphology.square(size)
-            else:
-                self.kernel = skimage.morphology.disk(size)
             self.currentFiltImg = maxFilter.process(image.divisionImg, self.sizeKernel)
 
         self.showImg(self.currentFiltImg)
@@ -1632,6 +1677,18 @@ class AppWidget(QtWidgets.QMainWindow):
         self.startTrackingButton.setEnabled(False)
         self.stopTrackingButton.setEnabled(True)
         self.tableButtonsGroupBox.setEnabled(False)
+        self.parametersWindow.setEnabled(False)
+        self.neighborhoodWindow.setEnabled(False)
+        self.neighborhoodWindow2.setEnabled(False)
+        self.pathsList.setEnabled(False)
+        self.backgroundGroupBox.setEnabled(False)
+        self.filterGroupBox.setEnabled(False)
+        self.segmentationGroupBox.setEnabled(False)
+        self.contrastGroupBox.setEnabled(False)
+        self.histogramMenuButton.setEnabled(False)
+        self.openMenuButton.setEnabled(False)
+        self.saveMenuButton.setEnabled(False)
+        self.labelsButton.setEnabled(False)
 
         # starting the computing thread and connecting emited results from the thread with specific methods
         self.running_thread.resultImage.connect(self.showImg)
@@ -1650,12 +1707,26 @@ class AppWidget(QtWidgets.QMainWindow):
 
     def stopTracking(self):
         # stops the computing when we press stop button in UI
-        self.running_thread.stop()
+        if Tracking.sameLabelAlive:
+            self.running_thread.stop()
 
-        self.startTrackingButton.setEnabled(True)
-        self.stopTrackingButton.setEnabled(False)
-        self.tableButtonsGroupBox.setEnabled(True)
-        self.running_thread = None
+            self.startTrackingButton.setEnabled(True)
+            self.stopTrackingButton.setEnabled(False)
+            self.tableButtonsGroupBox.setEnabled(True)
+            self.running_thread = None
+
+            self.parametersWindow.setEnabled(True)
+            self.neighborhoodWindow.setEnabled(True)
+            self.neighborhoodWindow2.setEnabled(True)
+            self.pathsList.setEnabled(True)
+            self.backgroundGroupBox.setEnabled(True)
+            self.filterGroupBox.setEnabled(True)
+            self.segmentationGroupBox.setEnabled(True)
+            self.contrastGroupBox.setEnabled(True)
+            self.histogramMenuButton.setEnabled(True)
+            self.openMenuButton.setEnabled(True)
+            self.saveMenuButton.setEnabled(True)
+            self.labelsButton.setEnabled(True)
 
     def sortTable(self):
         # sorts the items in the table
@@ -1705,7 +1776,10 @@ class AppWidget(QtWidgets.QMainWindow):
 
     def saveImage(self):
         # save the currently dislayed image into specific directory
-        filename, _ = QFileDialog.getSaveFileName(self, 'Save Image', "C:/Users/Michal/Documents/Škola/Diplomka/Text/images", '*.jpg')
+        files_types = "JPG (*.jpg);;PNG (*.png);;TIF(*.tif)"
+        filename, _ = QFileDialog.getSaveFileName(self, 'Save Image', "C:", files_types)
+        if not filename:
+            return True
         self.pixmap.save(filename)
 
     def filterTable(self):
@@ -1736,7 +1810,7 @@ class AppWidget(QtWidgets.QMainWindow):
         currentRow = 0
         deleteList = []
 
-        # we performe a interpolation of the given centroid position and comparing them with the positions in table
+        # we perform a interpolation of the given centroid position and comparing them with the positions in table
         # if the position in table is not in given tolerance we mark it "red" and user can delete it or keep it afterwards
         for label in self.uniqueLabel:
             for count,(x2,y2) in enumerate(zip(self.pozX[label],self.pozY[label])):
@@ -1791,6 +1865,7 @@ class AppWidget(QtWidgets.QMainWindow):
                     deleteLabel.append(label)
                     self.deleteRow(label = label)
         self.errorWarning.setInformativeText(None)
+
         # update the label list in the table
         for x in deleteLabel:
             self.uniqueLabel.remove(x)
@@ -1839,9 +1914,9 @@ class AppWidget(QtWidgets.QMainWindow):
             x_new = np.linspace(self.pozX[label][0], self.pozX[label][-1], 200)
             y_new = fit(x_new)
 
-            plt.plot(*points.T,'x', label="Body těžiště")
-            plt.plot(*interpolated_points.T,'-', label="Interpolační křivka")
-            plt.plot(x_new, y_new, '--', label = "Aproximační křivka")
+            plt.plot(*points.T,'bx', label="Body těžiště")
+            plt.plot(*interpolated_points.T,'r-', label="Interpolační křivka")
+            plt.plot(x_new, y_new, 'g--', label = "Aproximační křivka")
             plt.legend(loc='best')
 
         for label in problemLabel:
@@ -1870,12 +1945,12 @@ class AppWidget(QtWidgets.QMainWindow):
             plt.ylabel('orientace')
             plt.title('Průběh orientace a elongace vlákna')
             ax.set_yticklabels(yLabel)
+
             splineX = interp1d(self.pozX[label], self.orientation[label], kind = 'linear')
             newX = np.linspace(min(self.pozX[label]),max(self.pozX[label]), 200)
             interpolated_points = splineX(newX)
-            ax.plot(self.pozX[label], self.orientation[label], 'kx',label="Hodnoty orientace")
-            ax.plot(newX, interpolated_points,'-g', label="Interpolační křivka orientace")
-            #ax.legend(loc='best', fontsize = 'small')
+            ax.plot(self.pozX[label], self.orientation[label], 'bo',label="Hodnoty orientace")
+            ax.plot(newX, interpolated_points,'-r', label="Interpolační křivka orientace")
 
             ax2 = ax.twinx()
             ax2.set_ylabel('elongace')
@@ -1885,10 +1960,10 @@ class AppWidget(QtWidgets.QMainWindow):
             yTick = np.arange(0,6,1)
             ax2.set_yticks(yTick)
 
-            ax2.plot(self.pozX[label], self.ellongation[label], 'bo', label = "Hodnoty elongace")
-            ax.plot(np.nan, 'bo', label = 'Hodnoty elongace')
-            ax2.plot(newX, interpolated_points2, '--r', label = "Interpolační křivka elongace")
-            ax.plot(np.nan, '--r', label = 'Interpolační křivka elongace')
+            ax2.plot(self.pozX[label], self.ellongation[label], 'kx', label = "Hodnoty elongace")
+            ax.plot(np.nan, 'kx', label = 'Hodnoty elongace')
+            ax2.plot(newX, interpolated_points2, '--g', label = "Interpolační křivka elongace")
+            ax.plot(np.nan, '--g', label = 'Interpolační křivka elongace')
 
             ax.legend(loc='best', fontsize = 'small')
 
