@@ -45,10 +45,14 @@ class Image():
             skimage.io.imread(self.imagePath))
         return self.data
 
-    def contrast(self, black, white):
-        # convert image to uint16
-        image = skimage.util.img_as_uint(self.data)
+    def contrast(self, black, white, imageFilt=[]):
+        if imageFilt != []:
+            image = imageFilt
+        else:
+            image = skimage.util.img_as_uint(self.data)
+
         # rescale the intensity of image
+
         imageWithExposure = skimage.exposure.rescale_intensity(
             image, in_range=(black, white))
         return imageWithExposure
