@@ -85,7 +85,6 @@ class Tracking(QThread):
         const = 10
         labels = []
         newLabels = []
-        print('I am here')
 
         for objectLabel in self.properties:
             labels.append(objectLabel.label)
